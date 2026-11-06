@@ -1,0 +1,6 @@
+node_modules
+api/vendor
+dist
+.git
+.env
+*.log

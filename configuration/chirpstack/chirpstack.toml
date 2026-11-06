@@ -1,0 +1,24 @@
+[logging]
+level = "info"
+
+[postgresql]
+dsn = "postgres://chirpstack:$CHIRPSTACK_POSTGRES_PASSWORD@chirpstack-db/chirpstack?sslmode=disable"
+max_open_connections = 10
+
+[redis]
+servers = ["redis://redis/"]
+
+[network]
+net_id = "$NETWORK_NET_ID"
+enabled_regions = ["eu868"]
+
+[api]
+bind = "0.0.0.0:8080"
+secret = "$CHIRPSTACK_API_SECRET"
+
+[integration]
+enabled = ["mqtt"]
+
+[integration.mqtt]
+server = "tcp://mosquitto:1883/"
+json = true

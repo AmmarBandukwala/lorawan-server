@@ -1,0 +1,29 @@
+[general]
+log_level = 4
+
+[filters]
+net_ids = []
+join_euis = []
+
+[backend]
+type = "semtech_udp"
+
+[backend.semtech_udp]
+udp_bind = "0.0.0.0:1700"
+skip_crc_check = false
+fake_rx_time = false
+
+[integration]
+marshaler = "protobuf"
+
+[integration.mqtt]
+event_topic_template = "eu868/gateway/{{ .GatewayID }}/event/{{ .EventType }}"
+state_topic_template = "eu868/gateway/{{ .GatewayID }}/state/{{ .StateType }}"
+command_topic_template = "eu868/gateway/{{ .GatewayID }}/command/#"
+
+[integration.mqtt.auth]
+type = "generic"
+
+[integration.mqtt.auth.generic]
+servers = ["tcp://mosquitto:1883"]
+clean_session = true

@@ -1,0 +1,151 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fieldnode
+      POSTGRES_USER: fieldnode
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-dev-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fieldnode -d fieldnode"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - backend
+
+  chirpstack-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chirpstack
+      POSTGRES_USER: chirpstack
+      POSTGRES_PASSWORD: ${CHIRPSTACK_POSTGRES_PASSWORD:-local-core-change-me}
+    volumes:
+      - chirpstack-postgres-data:/var/lib/postgresql/data
+      - ./db/chirpstack-init.sql:/docker-entrypoint-initdb.d/001-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chirpstack -d chirpstack"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - protocol
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - protocol
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./configuration/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    networks:
+      - protocol
+
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    command: ["-c", "/etc/chirpstack"]
+    restart: unless-stopped
+    environment:
+      CHIRPSTACK_POSTGRES_PASSWORD: ${CHIRPSTACK_POSTGRES_PASSWORD:-local-core-change-me}
+      CHIRPSTACK_API_SECRET: ${CHIRPSTACK_API_SECRET:?Set CHIRPSTACK_API_SECRET in .env}
+      NETWORK_NET_ID: ${NETWORK_NET_ID:-000000}
+    volumes:
+      - ./configuration/chirpstack:/etc/chirpstack:ro
+    ports:
+      - "${CHIRPSTACK_UI_BIND_ADDRESS:-127.0.0.1}:${CHIRPSTACK_UI_PORT:-8091}:8080"
+    depends_on:
+      chirpstack-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    networks:
+      - protocol
+      - ingress
+
+  gateway-bridge:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    command: ["-c", "/etc/chirpstack-gateway-bridge/semtech-udp.toml"]
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_BIND_ADDRESS:-0.0.0.0}:1700:1700/udp"
+    volumes:
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge:ro
+    depends_on:
+      - mosquitto
+    networks:
+      - protocol
+      - ingress
+
+  gateway-bridge-basicstation:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    command: ["-c", "/etc/chirpstack-gateway-bridge/basic-station-eu868.toml"]
+    restart: unless-stopped
+    profiles: [basic-station]
+    ports:
+      - "${GATEWAY_BIND_ADDRESS:-0.0.0.0}:3001:3001"
+    volumes:
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge:ro
+      - ./certs/basic-station:/certs:ro
+    depends_on:
+      - mosquitto
+    networks:
+      - protocol
+      - ingress
+
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://fieldnode:${POSTGRES_PASSWORD:-local-dev-change-me}@db:5432/fieldnode?sslmode=disable
+      HTTP_ADDR: :8080
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+      - protocol
+
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_HTTP_PORT:-8082}:80"
+    depends_on:
+      - api
+    networks:
+      - backend
+      - ingress
+
+volumes:
+  postgres-data:
+  chirpstack-postgres-data:
+  redis-data:
+  mosquitto-data:
+
+networks:
+  backend:
+    internal: true
+  protocol:
+    internal: true
+  ingress:
+    driver: bridge
