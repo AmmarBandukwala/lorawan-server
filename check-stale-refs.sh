@@ -23,15 +23,21 @@ cd "$ROOT"
 
 status=0
 
-# Files worth scanning: text that a human writes. Generated and vendored files
-# are excluded because their "paths" are package tarballs and source maps.
-files=$(git ls-files -z | tr '\0' '\n' | grep -v -E \
-  '^(package-lock\.json|dist/|node_modules/)|\.(min\.(js|css)|map|png|ico|woff2?)$')
+# Everything in the tree that a commit would carry: tracked files plus new ones
+# not yet staged. Using tracked files only would skip the scan *and* the
+# resolution for a brand-new file, which is exactly the file most likely to be
+# wrong and is added in the same commit that would be checked.
+all=$(git ls-files --others --exclude-standard; git ls-files)
 
-# What a reference may point at: tracked files plus new ones not yet staged.
-# Resolving against tracked files only would report a fresh file as stale in the
-# perfectly normal commit that adds a document and the script it describes.
-resolvable=$(git ls-files --others --exclude-standard; git ls-files)
+# Files worth scanning: text that a human writes. Generated and vendored files
+# are excluded because their "paths" are package tarballs and source maps. This
+# script is excluded too, because its own pattern source contains the path
+# fragments it looks for and would report itself forever.
+files=$(printf '%s\n' "$all" | grep -v -E \
+  '^(package-lock\.json|dist/|node_modules/|check-stale-refs\.sh$)|\.(min\.(js|css)|map|png|ico|woff2?)$')
+
+# What a reference may point at: the same set.
+resolvable="$all"
 
 # 1. Directory-anchored paths: these can only mean a file in this tree.
 for f in $files; do
@@ -45,6 +51,15 @@ for f in $files; do
       ns/test|ns/internal|ns/cmd) [ -e "$tok" ] || {
         printf '%s:%s\tstale directory reference: %s\n' "$f" "$ln" "$tok"; }
         continue ;;
+    esac
+    # A final segment with a dot that is not a known file extension is a
+    # qualified identifier, not a path: `engine.UseRegionDefault` and
+    # `httpapi.regionDefault` are how Go names a constant, and prose about a
+    # constant in the other module is not a broken link.
+    last=${tok##*/}
+    case "$last" in
+      *.go|*.ts|*.tsx|*.js|*.jsx|*.mjs|*.sql|*.md|*.sh|*.toml|*.yaml|*.yml|*.json|*.rs|*.html|*.css) ;;
+      *.*) continue ;;
     esac
     # Try the path as written, then relative to ns/, then as a TypeScript
     # module specifier, which is written without an extension.
