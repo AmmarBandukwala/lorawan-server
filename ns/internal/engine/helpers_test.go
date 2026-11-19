@@ -8,7 +8,8 @@
 // way to do because fabricating radio history in a running server would be a way
 // to take a gateway down.
 //
-// Everything else moved to ns/test/scenarios and drives the exported API. When
+// Everything else lives beside this file as *_scenario_test.go in package
+// engine_test, which drives the exported API from outside the package. When
 // adding a test here, ask first whether it can be written from outside; only
 // reach for this file when the behaviour is genuinely internal.
 package engine

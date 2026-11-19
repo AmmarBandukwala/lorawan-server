@@ -14,9 +14,9 @@ here rather than scattered through the source.
 
 | Upstream | Where it influenced this code |
 | --- | --- |
-| `lrwn` test vectors (`lrwn/src/keys.rs`) | Key-derivation vectors in `ns/internal/lorawan/keys_test.go` |
-| `lrwn` frame tests (`lrwn/src/phy_payload.rs`) | Frame encode/decode vectors in `ns/internal/lorawan/phy_payload_test.go` and the OTAA round-trip test |
-| Counter reconstruction (`get_full_f_cnt_up`, `test_get_full_f_cnt_up`) | `ns/internal/lorawan/fcnt.go` and its assertion table in `fcnt_test.go` |
+| `lrwn` test vectors (`lrwn/src/keys.rs`) | Key-derivation vectors in `ns/internal/lorawan/keys_vectors_test.go` |
+| `lrwn` frame tests (`lrwn/src/phy_payload.rs`) | Frame encode/decode vectors in `ns/internal/lorawan/phy_payload_vectors_test.go` and the OTAA round-trip test |
+| Counter reconstruction (`get_full_f_cnt_up`, `test_get_full_f_cnt_up`) | `ns/internal/lorawan/fcnt.go` and its assertion table in `fcnt_vectors_test.go` |
 | Default ADR algorithm (`chirpstack/src/adr/default.rs`) | Parameterisation of `ns/internal/engine/adr.go`: 20-sample window, 3 dB per step, 10 dB installation margin, the loss-band `NbTrans` table, and the partial-window guard |
 | Required-SNR-per-spreading-factor table | `requiredSNRForSF` in `ns/internal/engine/adr.go` |
 | Regional parameter tables (`lrwn/src/region/`) | Cross-check for `ns/internal/region/`; the underlying values are RP002 1.0.3, which is the normative source |

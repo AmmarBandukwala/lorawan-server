@@ -3,7 +3,7 @@
 -- Every table is created by the migration set of the service that owns it:
 --
 --   ns_*   protocol state (devices, sessions, traffic, events, gateways),
---          created by ns/internal/storage/pgstore/migrations
+--          created by ns/internal/pgstore/migrations
 --   facility_profile
 --          dashboard-only display preference, created by
 --          api/internal/storage/postgres/migrations

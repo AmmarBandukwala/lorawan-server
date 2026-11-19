@@ -13,7 +13,7 @@ const DefaultEventHistory = 1000
 
 // MemStore is an in-memory Store implementation. It is safe for concurrent use
 // and backs the tests, the nsdemo binary and single-node evaluation. Nothing
-// survives a restart; production uses storage/pgstore.
+// survives a restart; production uses internal/pgstore.
 //
 // Values are deep-copied on both read and write, so a handler cannot mutate
 // stored state without going through SaveSession — the same discipline the

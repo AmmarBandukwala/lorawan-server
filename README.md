@@ -80,6 +80,40 @@ npm install && npm run lint && npm run build
 `make test-pg` runs the storage tests against a real PostgreSQL; `NS_TEST_DSN`
 points them at a database.
 
+A build and a test run do not check everything. Prose is not compiled, so after
+any move or rename:
+
+```sh
+./check-stale-refs.sh   # comments, docs and SQL that point at paths which no
+                        # longer exist; exits non-zero when one is stale
+```
+
+It found seven such references after the test-tree move, in files that had all
+compiled and passed. It is narrow on purpose — HTTP routes, Go import paths and
+citations into ChirpStack's Rust tree are excluded by construction, because a
+check with false positives is a check that gets ignored.
+
+## Mechanical changes
+
+Rules that exist because each was learned the hard way:
+
+- **Assert the effect, never the exit code.** `sed -i 's/\bFoo\b/foo/'` on macOS
+  matches nothing, exits `0`, and reports success. After any bulk edit, grep for
+  the postcondition: the old form absent *and* the new form present. Better, use
+  an editor or tool that fails loudly when a match is not found.
+- **Never transform a file in place.** Read the original from git
+  (`git show HEAD:path`) rather than a copy you made and might forget. A script
+  that writes the file it reads destroys its own input on the first bad run.
+- **Let the compiler validate code; validate prose separately.** The compiler
+  catches a moved import. It cannot catch a comment describing the old layout,
+  which is what `check-stale-refs.sh` is for.
+- **Prove a refactor lossless.** For a split or move, diff the sorted set of
+  declarations before and after; identical output is the only evidence that
+  nothing was dropped.
+- **Verify the committed tree, not the working tree.** Clone the pushed branch
+  somewhere temporary and run the suite there. It is the only check that catches
+  a test passing because of a file that was never committed.
+
 ## Layout
 
 ```

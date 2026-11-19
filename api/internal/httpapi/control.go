@@ -15,11 +15,16 @@ import (
 	"github.com/fieldnode/lorawan-server/api/internal/nsclient"
 )
 
-// regionDefault is the value that means "no device-specific limit" for
-// max_data_rate, min_data_rate and max_tx_power. The network server calls the
-// same value UseRegionDefault; the two modules share no package, so the number
-// is restated here rather than imported, and the contract test in ns/test/
-// contract keeps the two meanings aligned.
+// The wire value that means "no device-specific limit" for max_data_rate,
+// min_data_rate and max_tx_power.
+//
+// The network server calls the same value engine.UseRegionDefault. The two
+// modules share no package and no test can import both, so nothing can assert
+// they are equal. What can be done is the next best thing, and it is done in two
+// places: this package pins the literal in TestRegionDefaultMatchesTheNetworkServer,
+// and ns/internal/engine pins the same literal against its own constant. Change
+// one and its own suite fails with a message naming the other, which is the
+// strongest cross-module guarantee available without merging the modules.
 const regionDefault = -1
 
 // Controller sends commands to the network server and reads the state it holds
