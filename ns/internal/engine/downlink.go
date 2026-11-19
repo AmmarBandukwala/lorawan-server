@@ -211,6 +211,7 @@ func (e *Engine) scheduleDownlink(ctx context.Context, frame gateway.UplinkFrame
 		df := gateway.DownlinkFrame{
 			GatewayID:     frame.GatewayID,
 			RFRegion:      reg.CommonName(),
+			DeviceEUI:     rec.DevEUI,
 			UplinkID:      frame.UplinkID,
 			Window:        plan.Window,
 			Delay:         plan.Delay,

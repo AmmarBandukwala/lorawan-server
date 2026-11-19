@@ -33,6 +33,7 @@ import (
 
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway/lbs"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
 	"github.com/fieldnode/lorawan-server/ns/internal/storage/pgstore"
@@ -134,13 +135,47 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	if err := srv.Start(ctx); err != nil {
 		return err
 	}
-	lazy.Set(srv)
+
+	// Both transports need the engine as their uplink handler, and the engine
+	// needs a transmitter, so the router is built from what exists and installed
+	// afterwards. Registering UDP first matters only as a tie-break: when neither
+	// transport recognises a gateway the router tries them in this order.
+	router := gateway.NewRouter(gateway.NamedTransport{Name: "semtech-udp", Gateway: srv})
+
+	// Basics Station is a second route to the same engine. A station cannot be
+	// reached over UDP at all, so this is not an optimisation: without it the
+	// MultiTech, Kerlink, Rise-LR and Microchip-module gateways a field
+	// deployment actually contains are unusable.
+	var station *lbs.Server
+	if cfg.lbsAddr != "" {
+		station, err = lbs.New(lbs.Config{
+			Addr:                   cfg.lbsAddr,
+			Region:                 cfg.region,
+			NetID:                  cfg.netID,
+			JoinEUIs:               cfg.lbsJoinEUIs,
+			Token:                  cfg.lbsToken,
+			RadioPlanPath:          cfg.lbsRadioPlanPath,
+			AllowUnlimitedTransmit: cfg.lbsUnlimitedTransmit,
+			Handler:                eng,
+			Logger:                 log.With("component", "station"),
+		})
+		if err != nil {
+			_ = srv.Close()
+			return fmt.Errorf("build the basic station server: %w", err)
+		}
+		if err := station.Start(ctx); err != nil {
+			_ = srv.Close()
+			return err
+		}
+		router.Add("basic-station", station)
+	}
+	lazy.Set(router)
 
 	// Gateway presence is persisted on a timer so the dashboard can answer
 	// "which gateways do we have, and are they up" from the database. Stopping
 	// it is ordered before the pool closes, because its final flush writes.
 	stopGatewayPersister := startGatewayPersister(ctx, log.With("component", "gateway-store"),
-		srv, gatewayStore, cfg.region, cfg.gatewayFlushInterval)
+		router, gatewayStore, cfg.region, cfg.gatewayFlushInterval)
 
 	// The duty-cycle ledger and the frame de-duplication book are persisted for
 	// the same reason presence is: the in-memory version is a claim about the
@@ -150,9 +185,12 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 
 	var status *statusServer
 	if cfg.statusAddr != "" && !strings.EqualFold(cfg.statusAddr, "off") {
-		status = newStatusServer(cfg.statusAddr, log.With("component", "status"), srv, eng, integrations)
+		status = newStatusServer(cfg.statusAddr, log.With("component", "status"), router, eng, integrations)
 		if err := status.Start(); err != nil {
 			_ = srv.Close()
+			if station != nil {
+				_ = station.Close()
+			}
 			return err
 		}
 	}
@@ -165,6 +203,9 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 			log.With("component", "api"))
 		if err := api.Start(); err != nil {
 			_ = srv.Close()
+			if station != nil {
+				_ = station.Close()
+			}
 			if status != nil {
 				_ = status.Shutdown(context.Background())
 			}
@@ -175,6 +216,7 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	log.Info("fieldnode network server started",
 		"listen", srv.ListenAddr(), "region", cfg.region,
 		"net_id", cfg.netID.String(), "database", cfg.databaseURL != "",
+		"basic_station", station != nil,
 		"status", cfg.statusAddr, "api", api != nil,
 		"integrations", len(cfg.webhookURLs))
 
@@ -191,6 +233,13 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	var errs []error
 	if err := srv.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("close the gateway server: %w", err))
+	}
+	// Both radio transports stop before anything drains, so no downlink is
+	// dispatched into a transport that is already gone.
+	if station != nil {
+		if err := station.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close the basic station server: %w", err))
+		}
 	}
 	if status != nil {
 		if err := status.Shutdown(shutdownCtx); err != nil {

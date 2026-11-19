@@ -17,10 +17,17 @@ import (
 // storage does not depend on a particular gateway implementation: cmd/ns maps
 // whichever transport it started into this shape.
 type GatewayObservation struct {
-	EUI             lorawan.EUI64
-	LastSeen        time.Time
-	Region          string
+	EUI      lorawan.EUI64
+	LastSeen time.Time
+	Region   string
+	// ProtocolVersion is the Semtech packet-forwarder protocol version, and 0
+	// for a transport that has no such number. Protocol and Transport are the
+	// transport-neutral spelling, added once the server spoke two protocols.
 	ProtocolVersion byte
+	Transport       string
+	Protocol        string
+	Firmware        string
+	Model           string
 	Addr            string
 
 	Packets        uint64
@@ -39,7 +46,8 @@ type GatewayObservation struct {
 // Keeping the two in one place is what stops a added column from silently
 // shifting every value after it into the wrong field.
 var gatewayColumns = []string{
-	"gateway_id", "last_seen", "region", "protocol_version", "last_addr",
+	"gateway_id", "last_seen", "region", "protocol_version", "transport",
+	"protocol", "station_firmware", "station_model", "last_addr",
 	"packets", "rx_received", "rx_ok", "tx_received",
 	"downlinks_sent", "downlink_errors", "last_tx_ack_error",
 	"latitude", "longitude", "altitude",
@@ -52,6 +60,10 @@ func (o GatewayObservation) args() []any {
 		o.LastSeen,
 		o.Region,
 		int16(o.ProtocolVersion),
+		o.Transport,
+		o.Protocol,
+		o.Firmware,
+		o.Model,
 		o.Addr,
 		int64(o.Packets),
 		int64(o.RxReceived),

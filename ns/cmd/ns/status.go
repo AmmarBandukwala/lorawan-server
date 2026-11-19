@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
-	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
@@ -26,18 +26,18 @@ import (
 type statusServer struct {
 	addr    string
 	log     *slog.Logger
-	gatews  *semtech.Server
+	routers *gateway.Router
 	eng     *engine.Engine
 	integr  *integration.Dispatcher // nil when no endpoints are configured
 	started time.Time
 	http    *http.Server
 }
 
-func newStatusServer(addr string, log *slog.Logger, srv *semtech.Server, eng *engine.Engine,
+func newStatusServer(addr string, log *slog.Logger, routers *gateway.Router, eng *engine.Engine,
 	integr *integration.Dispatcher) *statusServer {
 
 	s := &statusServer{
-		addr: addr, log: log, gatews: srv, eng: eng, integr: integr, started: time.Now(),
+		addr: addr, log: log, routers: routers, eng: eng, integr: integr, started: time.Now(),
 	}
 
 	mux := http.NewServeMux()
@@ -81,15 +81,24 @@ func (s *statusServer) Shutdown(ctx context.Context) error {
 }
 
 type gatewayView struct {
-	EUI             string    `json:"gateway_eui"`
-	Address         string    `json:"address"`
-	ProtocolVersion int       `json:"protocol_version"`
-	Online          bool      `json:"online"`
-	LastSeen        time.Time `json:"last_seen"`
-	Packets         uint64    `json:"packets"`
-	DownlinksSent   uint64    `json:"downlinks_sent"`
-	DownlinkErrors  uint64    `json:"downlink_errors"`
-	LastTxAckError  string    `json:"last_tx_ack_error,omitempty"`
+	EUI       string `json:"gateway_eui"`
+	Transport string `json:"transport"`
+	Protocol  string `json:"protocol"`
+	Address   string `json:"address"`
+	// Firmware and Model are filled only by a Basics Station, which reports them
+	// during its handshake. An operator comparing two gateways that behave
+	// differently looks at these first.
+	Firmware string    `json:"firmware,omitempty"`
+	Model    string    `json:"model,omitempty"`
+	Online   bool      `json:"online"`
+	LastSeen time.Time `json:"last_seen"`
+	Packets  uint64    `json:"packets"`
+
+	DownlinksSent       uint64 `json:"downlinks_sent"`
+	DownlinkErrors      uint64 `json:"downlink_errors"`
+	DownlinkConfirmed   uint64 `json:"downlinks_confirmed"`
+	DownlinkUnconfirmed uint64 `json:"downlinks_unconfirmed"`
+	LastTxAckError      string `json:"last_tx_ack_error,omitempty"`
 	// StatsAt is a pointer because encoding/json treats a zero time.Time as a
 	// value, so omitempty alone would publish "0001-01-01T00:00:00Z" for a
 	// gateway that has not reported stats yet.
@@ -119,6 +128,11 @@ type statusView struct {
 	// they were actually running. Anything added to region.Names() becomes
 	// configurable in the console with no further change.
 	SupportedRegions []string `json:"supported_regions"`
+	// Transports lists the gateway protocols this process is listening for. An
+	// operator adding a Basics Station gateway checks this first: if
+	// "basic-station" is absent, the port is simply not open, which is a
+	// configuration answer rather than a gateway fault.
+	Transports []string `json:"transports"`
 	// Integrations reports the webhook dispatcher's counters, or nil when no
 	// endpoints are configured. A dropped count that keeps growing is the signal
 	// that a receiver is too slow, and this is where an operator sees it.
@@ -148,32 +162,52 @@ type integrationView struct {
 // response must stay interpretable, and the UI owns localisation.
 func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
-	onlineFor := s.gatews.OnlineTimeout()
-	gateways := s.gatews.Gateways()
-	views := make([]gatewayView, 0, len(gateways))
-	for _, g := range gateways {
+	// Each transport decides what "online" means, because the protocols give
+	// different evidence: a forwarder is judged by the gap between its PULL_DATA
+	// packets, a station by whether it still holds the connection.
+	timeouts := s.routers.OnlineTimeouts()
+	presence := s.routers.Presence()
+	views := make([]gatewayView, 0, len(presence))
+	online := 0
+	for _, g := range presence {
+		// A transport that reports Connected has already applied its own
+		// threshold; the timeout is the fallback for transports that only track
+		// a last-heard timestamp.
+		isOnline := g.Connected
+		if timeout, ok := timeouts[g.Transport]; ok && timeout > 0 {
+			isOnline = !g.LastSeen.IsZero() && now.Sub(g.LastSeen) <= timeout
+		}
+		if isOnline {
+			online++
+		}
+
 		var statsAt *time.Time
 		if !g.StatsAt.IsZero() {
 			at := g.StatsAt
 			statsAt = &at
 		}
 		views = append(views, gatewayView{
-			EUI:             g.EUI.String(),
-			Address:         g.Addr,
-			ProtocolVersion: int(g.ProtocolVersion),
-			Online:          g.Online(now, onlineFor),
-			LastSeen:        g.LastSeen,
-			Packets:         g.Packets,
-			DownlinksSent:   g.DownlinksSent,
-			DownlinkErrors:  g.DownlinkErrors,
-			LastTxAckError:  g.LastTxAckError,
-			StatsAt:         statsAt,
-			RxReceived:      g.LastStats.RxReceived,
-			RxOk:            g.LastStats.RxOK,
-			TxReceived:      g.LastStats.TxReceived,
-			Latitude:        g.LastStats.Latitude,
-			Longitude:       g.LastStats.Longitude,
-			Altitude:        g.LastStats.Altitude,
+			EUI:                 g.EUI.String(),
+			Transport:           g.Transport,
+			Protocol:            g.Protocol,
+			Address:             g.Address,
+			Firmware:            g.Firmware,
+			Model:               g.Model,
+			Online:              isOnline,
+			LastSeen:            g.LastSeen,
+			Packets:             g.Packets,
+			DownlinksSent:       g.DownlinksSent,
+			DownlinkErrors:      g.DownlinkErrors,
+			DownlinkConfirmed:   g.DownlinkConfirm,
+			DownlinkUnconfirmed: g.DownlinkUnconfirmed,
+			LastTxAckError:      g.LastTxError,
+			StatsAt:             statsAt,
+			RxReceived:          g.RxReceived,
+			RxOk:                g.RxOk,
+			TxReceived:          g.TxReceived,
+			Latitude:            g.Latitude,
+			Longitude:           g.Longitude,
+			Altitude:            g.Altitude,
 		})
 	}
 
@@ -184,8 +218,9 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		NetID:            cfg.NetID.String(),
 		DownlinkPower:    int(cfg.DownlinkPowerdBm),
 		GatewaysTotal:    len(views),
-		GatewaysOnline:   s.gatews.GatewaysOnline(),
+		GatewaysOnline:   online,
 		Gateways:         views,
+		Transports:       s.routers.Names(),
 		SupportedRegions: region.Names(),
 	}
 	if s.integr != nil {

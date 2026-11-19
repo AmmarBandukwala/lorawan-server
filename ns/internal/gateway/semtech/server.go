@@ -11,14 +11,17 @@ import (
 	"time"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
-// Handler is the network-server side of the transport. engine.Engine
-// implements it.
-type Handler interface {
-	HandleUplink(ctx context.Context, f gateway.UplinkFrame) error
-}
+// Handler is the network-server side of the transport. It is the shared
+// gateway.Handler contract, aliased here so existing call sites read naturally.
+type Handler = gateway.Handler
+
+// transportName is reported to the status endpoint and the dashboard so an
+// operator can see which protocol a gateway reached the server through.
+const transportName = "semtech-udp"
 
 // Config configures a Server.
 type Config struct {
@@ -146,6 +149,53 @@ func (s *Server) Gateways() []GatewayRecord { return s.reg.list() }
 
 // GatewaysOnline is the count the dashboard shows.
 func (s *Server) GatewaysOnline() int { return s.reg.onlineCount() }
+
+// CanReach reports whether this transport has ever heard from a gateway, which
+// is the only thing the UDP protocol reveals: there is no connection, so an
+// address we have is the best available claim that a downlink could arrive.
+func (s *Server) CanReach(id lorawan.EUI64) bool {
+	_, ok := s.reg.lookup(id)
+	return ok
+}
+
+// Presence reports every gateway that has sent this server a packet, in the
+// shape the status endpoint and dashboard share with the Basics Station
+// transport.
+//
+// Unlike that transport, a UDP forwarder is stateless between datagrams, so
+// there is no connection to be on or off: "connected" here means "heard from
+// within the online timeout", which is the closest honest equivalent. Gateways
+// are kept after they go quiet because the last time a forwarder was heard from
+// is the evidence that the problem is the gateway and not the configuration.
+func (s *Server) Presence() []gateway.Presence {
+	now := s.now()
+	records := s.reg.list()
+	out := make([]gateway.Presence, 0, len(records))
+	for _, rec := range records {
+		out = append(out, gateway.Presence{
+			EUI:       rec.EUI,
+			Transport: transportName,
+			Address:   rec.Addr,
+			Protocol:  fmt.Sprintf("semtech-udp v%d", rec.ProtocolVersion),
+			Connected: rec.Online(now, s.cfg.GatewayTimeout),
+			LastSeen:  rec.LastSeen,
+			Packets:   rec.Packets,
+			StatsAt:   rec.StatsAt,
+
+			RxReceived: rec.LastStats.RxReceived,
+			RxOk:       rec.LastStats.RxOK,
+			TxReceived: rec.LastStats.TxReceived,
+			Latitude:   rec.LastStats.Latitude,
+			Longitude:  rec.LastStats.Longitude,
+			Altitude:   rec.LastStats.Altitude,
+
+			DownlinksSent:  rec.DownlinksSent,
+			DownlinkErrors: rec.DownlinkErrors,
+			LastTxError:    rec.LastTxAckError,
+		})
+	}
+	return out
+}
 
 // OnlineTimeout is how long a gateway may stay silent before it counts as
 // offline, so status reporting and the registry cannot disagree.

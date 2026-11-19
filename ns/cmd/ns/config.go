@@ -72,6 +72,26 @@ type config struct {
 	// open: an unauthenticated endpoint that can transmit radio frames on a LAN
 	// is not a safe default.
 	apiToken string
+
+	// --- LoRa Basics Station (WebSocket) transport --------------------------
+
+	// lbsAddr is the LNS endpoint stations connect to. 30001 is the port a
+	// station uses when it is given nothing but a host name, so the default
+	// keeps gateway configuration to one field. "off" or empty disables the
+	// transport for deployments that will never have a station.
+	lbsAddr string
+	// lbsToken, when set, must be presented by a station. Empty leaves the
+	// endpoint open, which is logged at startup: an open LNS endpoint lets
+	// anyone on the network inject uplinks and claim a gateway EUI.
+	lbsToken string
+	// lbsRadioPlanPath names an sx1301_conf file pushed to stations. Empty lets
+	// each station keep its own radio plan, which is the safe default.
+	lbsRadioPlanPath string
+	// lbsJoinEUIs restricts which join servers stations forward. Empty forwards
+	// every join-request, which is right while join EUIs live on the device.
+	lbsJoinEUIs []string
+	// lbsUnlimitedTransmit tells stations to skip duty cycle and dwell time.
+	lbsUnlimitedTransmit bool
 }
 
 // loadConfig reads the environment and validates it. Every failure names the
@@ -171,6 +191,39 @@ func loadConfig() (config, error) {
 		// a device radio. Refusing to start beats a quiet warning here.
 		return cfg, fmt.Errorf("NS_API_TOKEN must be at least 16 characters; " +
 			"generate one with: openssl rand -hex 32")
+	}
+
+	// Basics Station. Enabled by default on the port a station assumes, because a
+	// MultiTech or Kerlink gateway that can only speak LNS is otherwise
+	// unusable and the fix is invisible. NS_LBS_ADDR=off turns it off for
+	// deployments that will never have one.
+	cfg.lbsAddr = strings.TrimSpace(envString("NS_LBS_ADDR", ":30001"))
+	if strings.EqualFold(cfg.lbsAddr, "off") {
+		cfg.lbsAddr = ""
+	}
+	cfg.lbsToken = strings.TrimSpace(os.Getenv("NS_LBS_TOKEN"))
+	if cfg.lbsAddr != "" && cfg.lbsToken == "" {
+		// Warned rather than refused: a station behind a proxy that cannot set
+		// headers is a real deployment, and the UDP port is open by default too.
+		// The difference is worth stating — an open LNS endpoint lets anyone who
+		// can reach it claim a gateway EUI and inject uplinks.
+		slog.Warn("NS_LBS_TOKEN is not set: any client that can reach the LNS " +
+			"port can register as a gateway and inject uplinks")
+	}
+	if len(cfg.lbsToken) > 0 && len(cfg.lbsToken) < 16 {
+		return cfg, fmt.Errorf("NS_LBS_TOKEN must be at least 16 characters; " +
+			"generate one with: openssl rand -hex 32")
+	}
+	cfg.lbsRadioPlanPath = strings.TrimSpace(os.Getenv("NS_LBS_RADIO_PLAN"))
+	cfg.lbsJoinEUIs = envList("NS_LBS_JOIN_EUIS")
+	for _, raw := range cfg.lbsJoinEUIs {
+		if _, err := lorawan.ParseEUI64(raw); err != nil {
+			return cfg, fmt.Errorf("NS_LBS_JOIN_EUIS entry %q: %w", raw, err)
+		}
+	}
+	cfg.lbsUnlimitedTransmit, err = envBool("NS_LBS_UNLIMITED_TRANSMIT")
+	if err != nil {
+		return cfg, err
 	}
 	return cfg, nil
 }

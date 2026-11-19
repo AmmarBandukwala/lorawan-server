@@ -32,6 +32,7 @@ to settle it.
 | `internal/gateway` | Transport contract: `UplinkFrame` / `DownlinkFrame`, RX windows, `Gateway` port | M2 ✅ (types) |
 | `cmd/nsdemo` | End-to-end walkthrough with no radio: join → uplink → downlink → ADR → dedup → replay | M2 ✅ |
 | `internal/gateway/semtech` | Semtech UDP packet forwarder: `push_data` / `pull_data` / `pull_resp` / `tx_ack`, gateway registry, downlink timing | M3 ✅ |
+| `internal/gateway/lbs` | LoRa Basics Station over WebSocket: handshake and `router_config`, `jreq`/`updf`, `dnmsg`, `dntxed`, `timesync`, xtime scheduling, transmission tracking | M6 ✅ |
 | `cmd/ns` | The network-server process: env config, UDP listener, status endpoint, graceful shutdown | M3 ✅ |
 | `cmd/nsbench` | Simulated gateway + class-A device that drives a running `ns` over real UDP | M3 ✅ |
 | `test/contract` | Our output against published vectors: RFC 4493, ChirpStack frames and keys, RP002 band tables | M1 ✅ |
@@ -104,8 +105,12 @@ to settle it.
    * **Class C is stored but not implemented.** `supports_class_c` is persisted,
      editable and reported, and the engine never reads it. The console says so on
      the toggle rather than implying a device became reachable.
-   * **One transport only.** Semtech UDP is implemented; Basic Station/LWS is not,
-     so an LTE-backed gateway that speaks only that cannot be used.
+   * **Station trust is one shared secret.** A Basics Station can claim any
+     gateway EUI, and `NS_LBS_TOKEN` is a single value shared by every station
+     rather than a per-gateway credential. Per-gateway tokens or client
+     certificates are what a deployment with more than one operator needs. TLS
+     also has to be terminated in front of the LNS port, because stations
+     normally demand `wss://`.
    * **Five band plans, six names.** US915, EU868 and AS923 with its -2/-3/-4
      frequency offsets. AU915, CN470, IN865, RU864 and KR920 need tables, tests
      and duty-cycle rules. `region.Names()` is the only list; the operator API and
@@ -252,10 +257,19 @@ operator can see rather than infer from behaviour.
   noise. What is not done is transmitting the same downlink through *every*
   gateway that heard the device, which is the other way of raising the chance the
   device hears it — at the cost of occupying the channel once per gateway.
-- **Basic Station / WebSocket gateways.** Only the Semtech UDP protocol is
-  spoken, so concentrators that require Basic Station still need the bridge.
-- **Gateway configuration over the protocol.** Channels come from `NS_REGION`;
-  nothing pushes a `router/config` update to the forwarder.
+- **Station radio plans are trusted by default.** `router_config` is sent at the
+  handshake and carries this server's band, RX2 parameters and data-rate table,
+  so a station cannot disagree about where downlinks arrive. What is not pushed
+  unless `NS_LBS_RADIO_PLAN` names a file is the `sx1301_conf` concentrator plan,
+  so a station left with a wrong local plan still tunes the wrong RF chains.
+- **Station configuration is sent once.** `router_config` goes out at the
+  handshake and is not re-pushed when the server's band or RX2 settings change;
+  the station has to reconnect to learn them.
+- **No configuration channel for UDP forwarders.** A packet forwarder takes its
+  channels from its own `global_conf.json`, and the server has no way to change
+  them, which is why `NS_REGION` has to match what the gateway was configured
+  with. Basics Station is the only transport here where configuration can be
+  pushed at all.
 - **RX-window detection.** A packet forwarder does not report which window a
   frame arrived in, so every uplink is treated as RX1. That is safe because the
   engine answers in both windows, but an RX2-only repeat is scheduled as if it

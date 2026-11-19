@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/storage/pgstore"
 )
 
@@ -16,9 +16,11 @@ type gatewayPersister interface {
 	RecordGatewayObservations(ctx context.Context, obs []pgstore.GatewayObservation) error
 }
 
-// gatewayRegistry is the part of the transport this reads.
+// gatewayRegistry is the part of the transport layer this reads. Both transports
+// satisfy it through gateway.Reporter, so a deployment that speaks UDP, Basics
+// Station, or both persists one gateway list without knowing which is which.
 type gatewayRegistry interface {
-	Gateways() []semtech.GatewayRecord
+	Presence() []gateway.Presence
 }
 
 // startGatewayPersister keeps ns_gateways in step with the live registry.
@@ -76,28 +78,31 @@ func startGatewayPersister(ctx context.Context, log *slog.Logger, reg gatewayReg
 func flushGateways(ctx context.Context, log *slog.Logger, reg gatewayRegistry,
 	persist gatewayPersister, regionName string) {
 
-	records := reg.Gateways()
+	records := collapseByGateway(reg.Presence())
 	if len(records) == 0 {
 		return
 	}
 	obs := make([]pgstore.GatewayObservation, 0, len(records))
 	for _, r := range records {
 		obs = append(obs, pgstore.GatewayObservation{
-			EUI:             r.EUI,
-			LastSeen:        r.LastSeen,
-			Region:          regionName,
-			ProtocolVersion: r.ProtocolVersion,
-			Addr:            r.Addr,
-			Packets:         r.Packets,
-			RxReceived:      r.LastStats.RxReceived,
-			RxOK:            r.LastStats.RxOK,
-			TxReceived:      r.LastStats.TxReceived,
-			DownlinksSent:   r.DownlinksSent,
-			DownlinkErrors:  r.DownlinkErrors,
-			LastTxAckError:  r.LastTxAckError,
-			Latitude:        r.LastStats.Latitude,
-			Longitude:       r.LastStats.Longitude,
-			Altitude:        r.LastStats.Altitude,
+			EUI:            r.EUI,
+			LastSeen:       r.LastSeen,
+			Region:         regionName,
+			Transport:      r.Transport,
+			Protocol:       r.Protocol,
+			Firmware:       r.Firmware,
+			Model:          r.Model,
+			Addr:           r.Address,
+			Packets:        r.Packets,
+			RxReceived:     r.RxReceived,
+			RxOK:           r.RxOk,
+			TxReceived:     r.TxReceived,
+			DownlinksSent:  r.DownlinksSent,
+			DownlinkErrors: r.DownlinkErrors,
+			LastTxAckError: r.LastTxError,
+			Latitude:       r.Latitude,
+			Longitude:      r.Longitude,
+			Altitude:       r.Altitude,
 		})
 	}
 	if err := persist.RecordGatewayObservations(ctx, obs); err != nil {
@@ -108,4 +113,42 @@ func flushGateways(ctx context.Context, log *slog.Logger, reg gatewayRegistry,
 		return
 	}
 	log.Debug("persisted the gateway registry", "gateways", len(obs))
+}
+
+// collapseByGateway reduces a per-transport presence list to one row per gateway.
+//
+// The status endpoint deliberately keeps both rows when a gateway appears on two
+// transports — seeing which one is carrying traffic is the point during a
+// protocol switch-over — but ns_gateways is keyed by gateway, and Postgres
+// rejects an upsert batch that touches the same key twice. So the durable shadow
+// keeps one row, preferring whichever transport the gateway is live on right now
+// and, failing that, the most recently heard from.
+func collapseByGateway(in []gateway.Presence) []gateway.Presence {
+	best := make(map[string]gateway.Presence, len(in))
+	order := make([]string, 0, len(in))
+	for _, p := range in {
+		key := p.EUI.String()
+		current, seen := best[key]
+		if !seen {
+			order = append(order, key)
+			best[key] = p
+			continue
+		}
+		if betterPresence(p, current) {
+			best[key] = p
+		}
+	}
+	out := make([]gateway.Presence, 0, len(order))
+	for _, key := range order {
+		out = append(out, best[key])
+	}
+	return out
+}
+
+// betterPresence reports whether a should replace b.
+func betterPresence(a, b gateway.Presence) bool {
+	if a.Connected != b.Connected {
+		return a.Connected
+	}
+	return a.LastSeen.After(b.LastSeen)
 }

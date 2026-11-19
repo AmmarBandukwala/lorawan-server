@@ -60,13 +60,37 @@ export type PendingDownlink = {
 
 export type GatewayHealth = {
   gateway_eui: string
+  /**
+   * Which gateway protocol this gateway is connected over — "semtech-udp" or
+   * "basic-station". It is the first thing to check when a gateway behaves
+   * differently than expected, because the two transports differ in timing
+   * precision and in what they report.
+   */
+  transport: string
+  /**
+   * The transport's own version string: the packet-forwarder protocol revision
+   * for UDP gateways, the station firmware for Basics Station. The network
+   * server sends whatever the gateway told it, so this is a string rather than
+   * a number — an earlier version of this type declared it numeric and the
+   * console rendered "Protocol vundefined" for every gateway.
+   */
+  protocol: string
   address: string
-  protocol_version: number
+  firmware?: string
+  model?: string
   online: boolean
   last_seen: string
   packets: number
   downlinks_sent: number
   downlink_errors: number
+  /**
+   * Transmissions the gateway confirmed it actually radiated, and the
+   * difference from downlinks_sent is what "scheduled but never emitted" looks
+   * like. A dnmsg can leave the server and still never reach the air; only the
+   * confirmation says otherwise.
+   */
+  downlinks_confirmed: number
+  downlinks_unconfirmed: number
   /** The concentrator's own words about the last refused transmission. */
   last_tx_ack_error?: string
   stats_at?: string
@@ -97,6 +121,19 @@ export type NetworkStatus = {
   gateways_total: number
   gateways_online: number
   gateways: GatewayHealth[]
+  /**
+   * Every band this build implements. The console should offer these rather than
+   * its own list, which is how the settings form and the server came to disagree
+   * about which regions exist.
+   */
+  supported_regions?: string[]
+  /**
+   * The gateway protocols this process is listening for. A station that will not
+   * connect while UDP gateways are fine is explained here: if "basic-station" is
+   * absent, the port is not open, which is a configuration answer rather than a
+   * gateway fault.
+   */
+  transports?: string[]
   integrations?: {
     sinks: string[]
     published: number

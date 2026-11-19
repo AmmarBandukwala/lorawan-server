@@ -8,7 +8,7 @@ import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, Settings
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
 import { fetchRegions, fetchStatus, type NetworkStatus, type RegionList } from './features/network/control'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
-import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS } from './features/network/constants'
+import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, transportLabel } from './features/network/constants'
 import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
 import './App.css'
 
@@ -240,7 +240,11 @@ function App() {
             {gateways.map((gateway) => <GatewayCard key={gateway.id} gateway={gateway} health={status?.gateways.find((g) => g.gateway_eui.toUpperCase() === gateway.id.toUpperCase())} />)}
             {gateways.length === 0 && <div className="panel empty-panel">{status && status.gateways.length > 0
               ? 'Gateways are on the air but not registered in the inventory yet.'
-              : 'No gateways have been heard from. Point a packet forwarder at this server’s UDP port and it will appear here.'}</div>}
+              : 'No gateways have been heard from. Point a packet forwarder at this server’s UDP port, or a Basics Station at its WebSocket endpoint, and it will appear here.'}</div>}
+            {/* Which transports are open is the first answer when a gateway will
+                not connect: a station aimed at a port that is not listening
+                fails silently, and this says so without reading server logs. */}
+            {status?.transports && status.transports.length > 0 && <div className="panel integration-panel"><div className="panel-heading"><div><h2>Listening for</h2><p>Gateway protocols this server accepts</p></div></div><div className="gateway-stats">{status.transports.map((transport) => <div key={transport}><span>{transportLabel(transport)}</span><b>open</b></div>)}</div></div>}
             {status?.duty_cycle && <DutyCyclePanel usage={status.duty_cycle.usage} window={status.duty_cycle.window} denials={status.duty_cycle.denials} />}
             {status && status.integrations && <article className="panel integration-panel"><div className="panel-heading"><div><h2>Integrations</h2><p>{status.integrations.sinks.join(', ') || 'No sinks configured'}</p></div></div><div className="gateway-stats"><div><span>Delivered</span><b>{status.integrations.published.toLocaleString()}</b></div><div><span>Failed</span><b>{status.integrations.delivery_failures.toLocaleString()}</b></div><div><span>Dropped</span><b>{status.integrations.dropped.toLocaleString()}</b></div><div><span>In queue</span><b>{status.integrations.queued.toLocaleString()}</b></div></div>{status.integrations.dropped > 0 && <p className="form-error" role="alert">Events are being dropped: the queue is full, so a receiver is too slow or unreachable.</p>}</article>}
             {!status && <div className="panel integration-panel"><b>No health report from the network server.</b><span> Gateway presence, duty-cycle occupancy and integration counters need the network server reachable.</span></div>}

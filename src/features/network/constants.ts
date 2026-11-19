@@ -70,3 +70,22 @@ export const SIGNAL_QUALITY = {
 
 /** Battery percentage below which a device is flagged for replacement. */
 export const LOW_BATTERY_PERCENT = 20
+
+/**
+ * How each gateway transport the network server reports is written in the
+ * interface. The server's own value is the wire name it also uses in its logs,
+ * so it is kept in the payload and translated only here.
+ *
+ * An unknown transport is shown verbatim rather than as "unknown": a build that
+ * adds a third gateway protocol should read as that protocol's name, not as a
+ * gap in the console's vocabulary.
+ */
+const TRANSPORT_LABELS: Record<string, string> = {
+  'semtech-udp': 'UDP forwarder',
+  'basic-station': 'Basics Station',
+}
+
+export function transportLabel(transport: string): string {
+  if (transport === '') return 'transport unknown'
+  return TRANSPORT_LABELS[transport] ?? transport
+}

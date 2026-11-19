@@ -55,11 +55,25 @@ services:
       NS_DATABASE_URL: postgres://fieldnode:${POSTGRES_PASSWORD}@db:5432/fieldnode?sslmode=disable
       NS_API_TOKEN: ${NS_API_TOKEN:?Set NS_API_TOKEN in .env (at least 16 characters)}
       NS_LOG_LEVEL: ${NS_LOG_LEVEL:-info}
+      # LoRa Basics Station endpoints. Stations dial this port directly, so it
+      # is published like the UDP one. NS_LBS_TOKEN is what stops any client
+      # that can reach it from claiming to be a gateway: without it the server
+      # still runs, but it logs a warning on every start because the trust has
+      # to come from the network instead. Set NS_LBS_ADDR=off to close the
+      # transport on a network that will never have a station.
+      NS_LBS_ADDR: :30001
+      NS_LBS_TOKEN: ${NS_LBS_TOKEN:-}
+      NS_LBS_RADIO_PLAN: ${NS_LBS_RADIO_PLAN:-}
+      NS_LBS_JOIN_EUIS: ${NS_LBS_JOIN_EUIS:-}
     ports:
       # The one mapping that must not default to loopback: gateways reach it from
       # the LAN. Set NS_GATEWAY_BIND_ADDRESS=127.0.0.1 to restrict it to a local
       # simulator.
       - "${NS_GATEWAY_BIND_ADDRESS:-0.0.0.0}:${NS_GATEWAY_PORT:-6858}:6858/udp"
+      # Basics Station connects here over WebSocket. Reachable from the LAN for
+      # the same reason as the UDP port, and restricted the same way with
+      # NS_LBS_BIND_ADDRESS.
+      - "${NS_LBS_BIND_ADDRESS:-0.0.0.0}:${NS_LBS_PORT:-30001}:30001"
       # Status and application API stay on loopback: they are for this host's
       # operator and for the api service on the internal network. Both are
       # published, because the operator's curl examples and the nsbench smoke run
