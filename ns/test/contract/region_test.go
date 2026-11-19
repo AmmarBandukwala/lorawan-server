@@ -144,11 +144,16 @@ func TestAS923(t *testing.T) {
 	}
 }
 
-// TestMaxDownlinkPayloadSize checks the RP002 maximum payload sizes the engine
-// relies on to decide whether a downlink fits a receive window.
+// TestMaxDownlinkPayloadSize checks the maximum downlink PHY-payload sizes the
+// engine relies on to decide whether a frame fits a receive window.
+//
+// The numbers are lrwn's max_dl_payload_size_per_dr "m" values, not the LoRaWAN
+// maximum of 255. Getting these wrong in the generous direction is the dangerous
+// direction: the server then transmits a frame the device must discard, and the
+// only symptom is a downlink that never arrives.
 func TestMaxDownlinkPayloadSize(t *testing.T) {
 	eu868 := mustRegion(t, "EU868")
-	for dr, want := range map[int]int{0: 59, 2: 59, 3: 123, 4: 255, 5: 255} {
+	for dr, want := range map[int]int{0: 59, 2: 59, 3: 123, 4: 230, 5: 230, 6: 230, 7: 230} {
 		got, ok := eu868.MaxDownlinkPayloadSize(dr)
 		if !ok || got != want {
 			t.Errorf("EU868 DR%d max payload = %d/%v, want %d", dr, got, ok, want)
@@ -156,21 +161,36 @@ func TestMaxDownlinkPayloadSize(t *testing.T) {
 	}
 
 	us915 := mustRegion(t, "US915")
-	for dr, want := range map[int]int{8: 61, 9: 133, 13: 255} {
+	for dr, want := range map[int]int{8: 41, 9: 117, 10: 230, 13: 230} {
 		got, ok := us915.MaxDownlinkPayloadSize(dr)
 		if !ok || got != want {
 			t.Errorf("US915 DR%d max payload = %d/%v, want %d", dr, got, ok, want)
 		}
 	}
 
+	// DR8 is the US915 RX2 rate, so its limit is worth pinning on its own: it is
+	// the single value most able to silently cost a deployment its downlinks.
+	if got, _ := us915.MaxDownlinkPayloadSize(us915.Defaults().RX2DataRate); got != 41 {
+		t.Errorf("US915 RX2 data rate max payload = %d, want 41", got)
+	}
+
 	as923 := mustRegion(t, "AS923")
-	if got, ok := as923.MaxDownlinkPayloadSize(0); !ok || got != 59 {
-		t.Errorf("AS923 DR0 max payload = %d/%v, want 59", got, ok)
+	for dr, want := range map[int]int{0: 59, 3: 123, 4: 250, 7: 250} {
+		if got, ok := as923.MaxDownlinkPayloadSize(dr); !ok || got != want {
+			t.Errorf("AS923 DR%d max payload = %d/%v, want %d", dr, got, ok, want)
+		}
 	}
 
 	// An uplink-only data rate has no downlink limit. The caller must see
 	// "unknown" rather than a zero that would silently block every window.
 	if got, ok := eu868.MaxDownlinkPayloadSize(15); ok {
 		t.Errorf("EU868 DR15 max payload = %d/%v, want unknown", got, ok)
+	}
+	// LR-FHSS (EU868 DR8..DR11) is uplink-only, and so are the reserved DR12 and
+	// DR13: none of them may be scheduled as a downlink.
+	for _, dr := range []int{8, 9, 10, 11, 12, 13} {
+		if d, err := eu868.DataRate(dr); err == nil && d.Downlink {
+			t.Errorf("EU868 DR%d is marked downlink-capable but is uplink-only or reserved", dr)
+		}
 	}
 }

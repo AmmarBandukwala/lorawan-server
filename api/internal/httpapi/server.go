@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/fieldnode/lorawan-server/api/internal/domain"
 )
@@ -51,6 +53,12 @@ type Server struct {
 	repository  Repository
 	provisioner Provisioner
 	controller  Controller
+
+	// The band list the network server publishes, cached briefly so saving a
+	// facility profile does not pay a round trip. See supportedRegions.
+	regionMu      sync.Mutex
+	regionCache   []string
+	regionCacheAt time.Time
 }
 
 // New builds the console API. provisioner and controller may be nil, which means
@@ -70,6 +78,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/events", s.listEvents)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings", s.updateSettings)
+	// The band list the settings form offers. It is its own endpoint rather than
+	// a field on /settings because it describes what this build can do, not what
+	// the operator has configured.
+	mux.HandleFunc("GET /api/v1/regions", s.listRegions)
 
 	// Control plane. These make a device transmit, so they are grouped and
 	// commented as such: a read endpoint returning an error is a broken

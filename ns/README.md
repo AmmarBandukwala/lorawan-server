@@ -46,6 +46,8 @@ to settle it.
 | `internal/region` (toa, subband) | Time on air for LoRa and FSK; EU868 sub-band table with per-sub-band duty cycle | M6 ✅ |
 | `internal/engine` (dutycycle) | Transmit ledger: accounts for ToA before scheduling, defers a frame that would breach the limit | M6 ✅ |
 | `cmd/ns` (device API) | Device provisioning: list/get/create/replace/patch/delete, keys never returned | M6 ✅ |
+| `internal/engine` (aggregate) | Multi-gateway reception: copies of one frame are merged over a 200 ms window and answered through the best-SNR copy | M6 ✅ |
+| `internal/region` (registry) | The one list of implemented bands, read by the operator API and the console so neither can offer a band the server rejects | M6 ✅ |
 | `api` + Fieldnode UI | Device management in the console: read settings, patch them, revoke; relayed to the ns, which owns the row | M6 ✅ |
 
 ## Milestones
@@ -102,8 +104,11 @@ to settle it.
      the toggle rather than implying a device became reachable.
    * **One transport only.** Semtech UDP is implemented; Basic Station/LWS is not,
      so an LTE-backed gateway that speaks only that cannot be used.
-   * **Three regions.** EU868, US915 and AS923 (with its JS1/JS2 offsets).
-     AU915, CN470, IN865, RU864 and KR920 need tables, tests and duty-cycle rules.
+   * **Five band plans, six names.** US915, EU868 and AS923 with its -2/-3/-4
+     frequency offsets. AU915, CN470, IN865, RU864 and KR920 need tables, tests
+     and duty-cycle rules. `region.Names()` is the only list; the operator API and
+     the console both read it, so a band added there is configurable everywhere
+     and one removed stops being offered.
    * **ADR steps only through 125 kHz LoRa rates**, deliberately: an FSK or
      500 kHz rate is a jump of far more than the 3 dB the algorithm reasons in.
    * **No key rotation and no device-profile objects** beyond the per-device
@@ -239,10 +244,11 @@ operator can see rather than infer from behaviour.
 
 ## What this server deliberately does not do yet
 
-- **Multi-gateway aggregation.** A frame heard by two gateways is deduplicated
-  by dropping the second copy, rather than merging the receptions to pick the best
-  transmitter. Until that changes, a downlink leaves through whichever gateway
-  was heard from first.
+- **Single-gateway downlinks.** Copies of an uplink heard by several gateways are
+  merged, and the downlink is answered through the copy with the best signal to
+  noise. What is not done is transmitting the same downlink through *every*
+  gateway that heard the device, which is the other way of raising the chance the
+  device hears it — at the cost of occupying the channel once per gateway.
 - **Basic Station / WebSocket gateways.** Only the Semtech UDP protocol is
   spoken, so concentrators that require Basic Station still need the bridge.
 - **Gateway configuration over the protocol.** Channels come from `NS_REGION`;
@@ -284,8 +290,11 @@ Configuration is environment driven:
 | `NS_STATUS_ADDR` | `:8090` | `/healthz` and `/status`; `off` disables it |
 | `NS_API_ADDR` | `:8091` | application API; only served when `NS_API_TOKEN` is set |
 | `NS_API_TOKEN` | *(empty)* | bearer token for the API; empty disables it entirely |
-| `NS_REGION` | `EU868` | `EU868`, `US915`, `AS923`, `AS923-2`, `AS923-3`, `AS923-4` |
+| `NS_REGION` | `US915` | `US915`, `EU868`, `AS923`, `AS923-2`, `AS923-3`, `AS923-4` |
 | `NS_NET_ID` | `000000` | 6 hex digits; sets the DevAddr prefix of joining devices |
+| `NS_AGGREGATION_DELAY` | `200ms` | how long the first copy of a frame waits for other gateways to report the same transmission; `0` answers immediately and loses the other copies |
+| `NS_DUTY_CYCLE_WINDOW` | `1h` | period duty-cycle occupancy is measured over |
+| `NS_DISABLE_DUTY_CYCLE` | *(off)* | transmit without checking the band's duty cycle or dwell time. Only where the concentrator enforces them locally; the server logs a warning at startup |
 | `NS_DATABASE_URL` | *(empty)* | Postgres DSN; empty means in-memory state |
 | `NS_SEED_DEVICES` | *(empty)* | `devEUI:joinEUI:appKey` triples to provision at startup |
 | `NS_WEBHOOK_URLS` | *(empty)* | comma separated HTTP endpoints that receive events |
@@ -293,6 +302,7 @@ Configuration is environment driven:
 | `NS_DOWNLINK_POWER_DBM` | `14` | TX power handed to the gateway |
 | `NS_DEVICE_STATUS_EVERY` | `0` | ask every Nth uplink for battery/margin; 0 disables |
 | `NS_GATEWAY_TIMEOUT` | `180` | seconds of silence before a gateway counts as offline |
+| `NS_GATEWAY_FLUSH_INTERVAL` | `30s` | how often gateway presence and radio health are written to the store |
 | `NS_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 
 Without `NS_DATABASE_URL` the server warns and keeps sessions in memory: fine on

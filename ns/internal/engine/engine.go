@@ -84,9 +84,14 @@ const (
 )
 
 // DefaultConfig returns the configuration used when the caller supplies none.
+//
+// The band is region.DefaultRegion rather than a band named here, so a
+// deployment that changes the product default does not have to hunt down every
+// package that repeats it. Callers that need a specific band — nearly every
+// test — set Config.Region explicitly.
 func DefaultConfig() Config {
 	return Config{
-		Region:                "EU868",
+		Region:                region.DefaultRegion,
 		MaxFCntDelta:          DefaultMaxFCntDelta,
 		DedupWindow:           DefaultDedupWindow,
 		AggregationDelay:      DefaultAggregationDelay,

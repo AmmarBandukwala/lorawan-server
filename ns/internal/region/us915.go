@@ -119,7 +119,14 @@ func newUS915() *us915 {
 		downlinkChannels: down,
 		subBands:         us915SubBands, // no duty-cycle limit in US915
 		// RP002-400 MPDS for US915 downlink DR8..DR13 (SF12..SF7, 500 kHz).
-		maxDownlinkPL: map[int]int{8: 61, 9: 133, 10: 255, 11: 255, 12: 255, 13: 255},
+		// Maximum downlink PHY-payload size per data rate, from lrwn's
+		// max_dl_payload_size_per_dr for US915.
+		//
+		// DR8 is 41 bytes, not 61: SF12 is slow even on 500 kHz. It matters more
+		// here than anywhere else in this table, because DR8 is the US915 RX2
+		// data rate — an over-generous limit here means the server transmits
+		// frames on the window most devices listen in that they must discard.
+		maxDownlinkPL: map[int]int{8: 41, 9: 117, 10: 230, 11: 230, 12: 230, 13: 230},
 	}}
 }
 

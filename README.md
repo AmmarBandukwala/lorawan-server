@@ -138,6 +138,6 @@ forwarder the server has heard from.
 
 Read [`ns/README.md`](ns/README.md) for the milestone roadmap and, importantly,
 the list of what the network server does not do yet (class C/B, LR-FHSS,
-multi-gateway reception merging, hardware timing validation). EU868, US915 and
-AS923 are implemented; the console's region selector offers what the server
-enforces.
+simultaneous multi-gateway transmission, hardware timing validation). US915,
+EU868 and AS923 with its -2/-3/-4 offsets are implemented; the console's region
+selector offers what the server enforces, because both read one list.

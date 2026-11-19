@@ -1,6 +1,7 @@
 import { createElement as h } from 'react'
 import { renderToString } from 'react-dom/server'
 import App from '../src/App'
+import { FALLBACK_REGIONS } from '../src/features/network/constants'
 import { DeviceHeader, DeviceTable, GatewayCard, ActivityItem, SettingsForm } from '../src/features/network/components'
 import { DeviceConsole } from '../src/features/network/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/DeviceSettings'
@@ -48,13 +49,26 @@ check('GatewayCard renders radio health', renderToString(h(GatewayCard, { gatewa
 check('ActivityItem renders an event', renderToString(h(ActivityItem, { event })), 'Device joined')
 check('SettingsForm renders the draft', renderToString(h(SettingsForm, {
   draft, setDraft: noop, onSubmit: noop, saving: false, error: '', message: '', disabled: false,
+  regions: FALLBACK_REGIONS,
 })), 'North Depot')
 check('SettingsForm surfaces a save error', renderToString(h(SettingsForm, {
   draft, setDraft: noop, onSubmit: noop, saving: false, error: 'Region is not supported', message: '', disabled: false,
+  regions: FALLBACK_REGIONS,
 })), 'Region is not supported')
-check('SettingsForm offers the supported regions', renderToString(h(SettingsForm, {
+// The band list is a prop rather than a constant baked into the form, so this
+// asserts both that what the console was given is rendered and that the AS923
+// variants — the bands the old three-entry list left out — can reach the dropdown.
+check('SettingsForm offers the bands it was given', renderToString(h(SettingsForm, {
   draft, setDraft: noop, onSubmit: noop, saving: false, error: '', message: '', disabled: false,
-})), 'US915')
+  regions: FALLBACK_REGIONS,
+})), 'AS923-4')
+
+// When the network server could not be asked, the form must say the list is its
+// own: an operator choosing a regulatory band needs to know its provenance.
+check('SettingsForm flags a fallback band list', renderToString(h(SettingsForm, {
+  draft, setDraft: noop, onSubmit: noop, saving: false, error: '', message: '', disabled: false,
+  regions: FALLBACK_REGIONS, regionsAreFallback: true,
+})), 'could not be reached')
 
 const dialog = renderToString(h(RegisterDeviceDialog, {
   onClose: noop, onRegistered: noop, unreachable: false,

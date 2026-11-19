@@ -196,23 +196,88 @@ func (b *base) uplinkChannelIndex(frequencyHz uint32) (int, error) {
 	return 0, fmt.Errorf("%s: unknown uplink frequency %d Hz", b.name, frequencyHz)
 }
 
-// New constructs a region by common name. Supported: EU868, US915, AS923,
-// AS923-2 (JS1, -1.8 MHz), AS923-3 (JS2, -6.6 MHz), AS923-4 (-5.9 MHz).
-func New(commonName string) (Region, error) {
-	switch strings.ToUpper(strings.ReplaceAll(commonName, "_", "-")) {
-	case "EU868":
-		return newEU868(), nil
-	case "US915":
-		return newUS915(), nil
-	case "AS923":
-		return newAS923("AS923", 0), nil
-	case "AS923-2":
-		return newAS923("AS923-2", 1_800_000), nil
-	case "AS923-3":
-		return newAS923("AS923-3", 6_600_000), nil
-	case "AS923-4":
-		return newAS923("AS923-4", 5_900_000), nil
-	default:
-		return nil, fmt.Errorf("unsupported region %q", commonName)
+// registry is the set of bands this build implements, and the only place that
+// knows it. New and Names both read it, so the list a client is offered cannot
+// drift from the list the server accepts — the failure mode that made the
+// console offer three bands while the server accepted six.
+//
+// Order is the order the console should offer them in: the bands a Fieldnode
+// deployment is most likely to use first.
+var registry = []struct {
+	name string
+	make func() Region
+}{
+	{"US915", func() Region { return newUS915() }},
+	{"EU868", func() Region { return newEU868() }},
+	{"AS923", func() Region { return newAS923("AS923", 0) }},
+	{"AS923-2", func() Region { return newAS923("AS923-2", 1_800_000) }},
+	{"AS923-3", func() Region { return newAS923("AS923-3", 6_600_000) }},
+	{"AS923-4", func() Region { return newAS923("AS923-4", 5_900_000) }},
+}
+
+// Names returns the canonical names of every implemented band, in the order the
+// console should offer them.
+//
+// This is the source of truth the operator API and the dashboard read, rather
+// than each keeping its own list. A region added here becomes configurable
+// everywhere; a region removed here stops being offered rather than lingering in
+// a UI dropdown that the server would reject.
+func Names() []string {
+	out := make([]string, 0, len(registry))
+	for _, r := range registry {
+		out = append(out, r.name)
 	}
+	return out
+}
+
+// DefaultRegion is the band a deployment runs when nothing says otherwise.
+//
+// It is a product decision rather than a property of the band plans, but it
+// lives here because this is the only package every consumer already imports,
+// and a default repeated in the engine, the process config, Compose and the
+// dashboard is a default that eventually disagrees with itself.
+//
+// US915 is the default because Fieldnode's deployments are in the US. Changing
+// it here changes the fallback everywhere; it does not disturb a running
+// network, which either sets NS_REGION explicitly or has sessions that carry
+// the band they joined under.
+const DefaultRegion = "US915"
+
+// Supported reports whether name is an implemented band, accepting the same
+// spellings New does.
+func Supported(name string) bool {
+	_, err := New(name)
+	return err == nil
+}
+
+// New builds a band plan from its common name.
+func New(commonName string) (Region, error) {
+	wanted := normalizeName(commonName)
+	for _, r := range registry {
+		if normalizeName(r.name) == wanted {
+			return r.make(), nil
+		}
+	}
+	return nil, fmt.Errorf("unsupported region %q (supported: %s)",
+		commonName, strings.Join(Names(), ", "))
+}
+
+// normalizeName folds the spellings an operator plausibly types into a .env file
+// or a console field onto a comparable form: upper case, with the separators
+// removed.
+//
+// Removing rather than converting the separator is what makes both US_915 and
+// AS923_2 work. Converting underscores to hyphens fixes the second and breaks
+// the first, because US915 has no separator to begin with. No two band names
+// collide once separators are dropped, which TestNamesMatchConstructor keeps
+// true as bands are added.
+func normalizeName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(strings.TrimSpace(name)) {
+		if r == '-' || r == '_' || r == ' ' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

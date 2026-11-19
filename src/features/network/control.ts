@@ -184,6 +184,24 @@ export const fetchSession = (devEUI: string) =>
 export const fetchStatus = () => request<NetworkStatus>('GET', '/status')
 
 /**
+ * The bands this deployment can be configured for.
+ *
+ * `source` is part of the contract rather than decoration: "network-server"
+ * means the list is what the running server enforces, and "fallback" means the
+ * server could not be asked and the console is showing its own guess. An
+ * operator choosing a regulatory band deserves to know which of those happened.
+ */
+export type RegionList = {
+  regions: string[]
+  source: 'network-server' | 'fallback'
+  /** The band the facility profile currently records, which is not necessarily
+   *  the one the network server is enforcing. */
+  configured: string
+}
+
+export const fetchRegions = () => request<RegionList>('GET', '/regions')
+
+/**
  * Queues a downlink.
  *
  * Resolving means queued, not transmitted: a class-A device listens for two

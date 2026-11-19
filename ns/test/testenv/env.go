@@ -128,6 +128,20 @@ type Env struct {
 	Store  *engine.MemStore
 	GW     *Gateway
 	Clock  *Clock
+
+	// Where this environment places the frames its helpers build. A harness that
+	// always transmitted on an EU868 channel could not test US915 at all: the
+	// engine would reject the frequency as outside the band, and every scenario
+	// would silently be an EU868 scenario wearing another name.
+	//
+	// The default stays EU868 because the existing scenario corpus asserts EU868
+	// specifics (RX2 at 869.525 MHz, RX1 on the uplink channel). The product
+	// default is region.DefaultRegion (US915); NewRegion is how a test asks for
+	// another band, and TestUS915Session exercises that path end to end.
+	regionName   string
+	uplinkFreqHz uint32
+	uplinkDR     int
+
 	// sched is set by NewDeferred. When present, the helpers that a test expects
 	// to have completed synchronously run the pending work themselves, so a test
 	// only has to think about the scheduler when it is studying the scheduler.
@@ -199,7 +213,7 @@ func (env *Env) Join() (*sim.Device, []gateway.DownlinkFrame) {
 		env.t.Fatalf("NextJoinRequest: %v", err)
 	}
 	if err := env.Engine.HandleUplink(context.Background(),
-		UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5)); err != nil {
+		env.frame(wire, gateway.RxWindow1)); err != nil {
 		env.t.Fatalf("HandleUplink(join): %v", err)
 	}
 	env.Settle()
@@ -223,7 +237,7 @@ func (env *Env) Uplink(simDev *sim.Device, o sim.UplinkOptions, window gateway.R
 		env.t.Fatalf("NextUplink: %v", err)
 	}
 	if err := env.Engine.HandleUplink(context.Background(),
-		UplinkFrame(wire, window, EU868Ch0Hz, EU868DR5)); err != nil {
+		env.frame(wire, window)); err != nil {
 		env.t.Fatalf("HandleUplink: %v", err)
 	}
 	env.Settle()
@@ -234,7 +248,7 @@ func (env *Env) Uplink(simDev *sim.Device, o sim.UplinkOptions, window gateway.R
 func (env *Env) UplinkWire(wire []byte) error {
 	env.t.Helper()
 	err := env.Engine.HandleUplink(context.Background(),
-		UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5))
+		env.frame(wire, gateway.RxWindow1))
 	env.Settle()
 	return err
 }
@@ -260,7 +274,7 @@ func (env *Env) UplinkSNR(simDev *sim.Device, o sim.UplinkOptions, snr float64) 
 	if err != nil {
 		env.t.Fatalf("NextUplink: %v", err)
 	}
-	f := UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5)
+	f := env.frame(wire, gateway.RxWindow1)
 	f.SNR = snr
 	if err := env.Engine.HandleUplink(context.Background(), f); err != nil {
 		env.t.Fatalf("HandleUplink: %v", err)
@@ -268,11 +282,22 @@ func (env *Env) UplinkSNR(simDev *sim.Device, o sim.UplinkOptions, snr float64) 
 	env.Settle()
 }
 
-// UplinkFrame wraps radio bytes in the metadata a gateway would report.
+// UplinkFrame wraps radio bytes in the metadata a gateway would report, on the
+// band the EU868 fixtures are written for. Tests that care about the band use
+// UplinkFrameOn or an Env method, which follow the environment's band.
 func UplinkFrame(wire []byte, window gateway.RxWindow, freqHz uint32, dr int) gateway.UplinkFrame {
+	return UplinkFrameOn(wire, window, "EU868", freqHz, dr)
+}
+
+// UplinkFrameOn is UplinkFrame with the band named, because the frame's region
+// and its frequency have to agree or the engine is being asked to apply one
+// band's rules to another band's airtime.
+func UplinkFrameOn(wire []byte, window gateway.RxWindow, regionName string,
+	freqHz uint32, dr int) gateway.UplinkFrame {
+
 	return gateway.UplinkFrame{
 		GatewayID:     MustEUI64Static(GatewayEUI),
-		RFRegion:      "EU868",
+		RFRegion:      regionName,
 		RxWindow:      window,
 		FrequencyHz:   freqHz,
 		DataRateIndex: dr,
@@ -292,6 +317,18 @@ func UplinkFrame(wire []byte, window gateway.RxWindow, freqHz uint32, dr int) ga
 // token could not tell those two things apart.
 func CopyOf(wire []byte, gatewayEUI lorawan.EUI64, snr, rssi float64, token byte) gateway.UplinkFrame {
 	f := UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5)
+	f.GatewayID = gatewayEUI
+	f.SNR = snr
+	f.RSSI = rssi
+	f.UplinkID = [8]byte{token, token, token, token, token, token, token, token}
+	return f
+}
+
+// CopyOf is the environment's band version of the package CopyOf: a second
+// gateway's reception of the same frame, placed on the channel this environment
+// transmits on.
+func (env *Env) CopyOf(wire []byte, gatewayEUI lorawan.EUI64, snr, rssi float64, token byte) gateway.UplinkFrame {
+	f := env.frame(wire, gateway.RxWindow1)
 	f.GatewayID = gatewayEUI
 	f.SNR = snr
 	f.RSSI = rssi
@@ -486,7 +523,79 @@ func buildEnv(t *testing.T, store *engine.MemStore, st engine.Store,
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
 	}
-	return &Env{t: t, Engine: eng, Store: store, GW: gw, Clock: clk}
+
+	// Place the harness's frames on the band the engine is configured for, so a
+	// test that changes the band does not also have to know that band's channels.
+	freq, dr := defaultUplinkPlacement(t, cfg.Region)
+	return &Env{
+		t: t, Engine: eng, Store: store, GW: gw, Clock: clk,
+		regionName: cfg.Region, uplinkFreqHz: freq, uplinkDR: dr,
+	}
+}
+
+// defaultUplinkPlacement returns the band's first enabled uplink channel and the
+// fastest data rate that channel may use within the band's uplink range.
+//
+// The fastest, not the slowest: at the slowest rate every payload runs into the
+// band's minimum maximum-payload size (59 bytes on EU868 DR0), so ordinary test
+// frames would be refused for capacity rather than for whatever the test is
+// actually about. On EU868 and AS923 this resolves to DR5 (SF7BW125), the
+// fixture the scenarios were written against; on US915 channel 0 it resolves to
+// DR3, the fastest rate a 125 kHz channel there allows.
+func defaultUplinkPlacement(t *testing.T, regionName string) (freqHz uint32, dataRate int) {
+	t.Helper()
+
+	reg, err := region.New(regionName)
+	if err != nil {
+		t.Fatalf("testenv: %v", err)
+	}
+	maxUp := reg.Defaults().MaxUplinkDataRate
+	for _, ch := range reg.UplinkChannels() {
+		if !ch.Enabled || len(ch.DataRates) == 0 {
+			continue
+		}
+		best := -1
+		for _, dr := range ch.DataRates {
+			if dr <= maxUp && dr > best {
+				best = dr
+			}
+		}
+		if best >= 0 {
+			return ch.FrequencyHz, best
+		}
+	}
+	// A band with no usable default channel would make every scenario
+	// meaningless rather than merely awkward, so say so loudly.
+	t.Fatalf("testenv: region %s has no enabled uplink channel carrying a data rate "+
+		"at or below its maximum of DR%d", regionName, maxUp)
+	return 0, 0
+}
+
+// NewRegion builds an environment on a named band. The scenarios that matter on
+// every band — join, uplink, both receive windows, ADR — run through this so that
+// "supports multiple regions" is tested rather than asserted.
+func NewRegion(t *testing.T, regionName string, mutate func(*engine.Config)) *Env {
+	t.Helper()
+
+	return New(t, func(cfg *engine.Config) {
+		cfg.Region = regionName
+		if mutate != nil {
+			mutate(cfg)
+		}
+	})
+}
+
+// Region is the band this environment transmits on.
+func (env *Env) Region() string { return env.regionName }
+
+// UplinkFrequency and UplinkDataRate report where this environment places
+// frames, for assertions about the RX1 the engine should derive from them.
+func (env *Env) UplinkFrequency() uint32 { return env.uplinkFreqHz }
+func (env *Env) UplinkDataRate() int     { return env.uplinkDR }
+
+// frame builds a gateway uplink on this environment's band.
+func (env *Env) frame(wire []byte, window gateway.RxWindow) gateway.UplinkFrame {
+	return UplinkFrameOn(wire, window, env.regionName, env.uplinkFreqHz, env.uplinkDR)
 }
 
 // SharedSeen is an in-memory de-duplication book that several engines can point

@@ -79,10 +79,13 @@ type config struct {
 // operator gets.
 func loadConfig() (config, error) {
 	cfg := config{
-		listenAddr:           envString("NS_LISTEN_ADDR", ":6858"),
-		statusAddr:           envString("NS_STATUS_ADDR", ":8090"),
-		apiAddr:              envString("NS_API_ADDR", ":8091"),
-		region:               envString("NS_REGION", "EU868"),
+		listenAddr: envString("NS_LISTEN_ADDR", ":6858"),
+		statusAddr: envString("NS_STATUS_ADDR", ":8090"),
+		apiAddr:    envString("NS_API_ADDR", ":8091"),
+		// The band a network starts on when NS_REGION is unset. The value comes
+		// from the region package so this process, the engine's fallback and the
+		// documentation cannot name three different bands.
+		region:               envString("NS_REGION", region.DefaultRegion),
 		databaseURL:          strings.TrimSpace(os.Getenv("NS_DATABASE_URL")),
 		seedDevices:          strings.TrimSpace(os.Getenv("NS_SEED_DEVICES")),
 		gatewayTimeout:       envDuration("NS_GATEWAY_TIMEOUT", 3*time.Minute),

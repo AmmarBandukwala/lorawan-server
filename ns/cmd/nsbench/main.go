@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
 	"github.com/fieldnode/lorawan-server/ns/internal/sim"
@@ -43,14 +45,21 @@ type options struct {
 func main() {
 	var o options
 	flag.StringVar(&o.addr, "addr", "127.0.0.1:6858", "UDP address of the ns server")
-	flag.StringVar(&o.region, "region", "EU868", "regional band the simulated gateway uses")
+	flag.StringVar(&o.region, "region", region.DefaultRegion,
+		"regional band the simulated gateway uses; one of "+joinRegions())
 	flag.StringVar(&o.gatewayEUI, "gateway-eui", "AA55555555555555", "gateway EUI to announce")
 	flag.StringVar(&o.devEUI, "dev-eui", "0011223344556677", "device EUI")
 	flag.StringVar(&o.joinEUI, "join-eui", "0102030405060708", "join (App) EUI")
 	flag.StringVar(&o.appKey, "app-key", "2b7e151628aed2a6abf7158809cf4f3c", "OTAA AppKey")
 	flag.StringVar(&o.netID, "net-id", "000000", "NetID the server is configured with")
-	flag.Float64Var(&o.uplinkFreq, "freq", 868.1, "uplink channel in MHz")
-	flag.StringVar(&o.dataRate, "datr", "SF12BW125", "uplink data rate as a Semtech datr string")
+	// Left unset, the uplink goes out on the band's first enabled channel at the
+	// slowest data rate it allows — the settings a cold device actually uses.
+	// Deriving them from the band table is what makes `-region AS923-3` work
+	// without also having to know that band's channels by heart.
+	flag.Float64Var(&o.uplinkFreq, "freq", 0,
+		"uplink channel in MHz (default: the band's first uplink channel)")
+	flag.StringVar(&o.dataRate, "datr", "",
+		"uplink data rate as a Semtech datr string (default: the band's minimum data rate)")
 	flag.StringVar(&o.payload, "payload", "48656c6c6f204669656c646e6f6465", "application payload, hex")
 	flag.DurationVar(&o.timeout, "timeout", 12*time.Second, "how long to wait for each downlink window")
 	flag.Parse()
@@ -61,12 +70,46 @@ func main() {
 	}
 }
 
+// resolveUplink fills the uplink frequency and data rate from the band when the
+// operator did not name them, taking the first uplink channel and the band's
+// minimum data rate — what a device that has never heard from a network uses.
+func (o *options) resolveUplink(reg region.Region) error {
+	channels := reg.UplinkChannels()
+	if len(channels) == 0 {
+		return fmt.Errorf("region %s exposes no uplink channels", reg.CommonName())
+	}
+	if o.uplinkFreq == 0 {
+		o.uplinkFreq = float64(channels[0].FrequencyHz) / 1e6
+	}
+	if o.dataRate == "" {
+		_, datr, _, err := semtech.DataRateStrings(reg, reg.Defaults().MinUplinkDataRate)
+		if err != nil {
+			return fmt.Errorf("derive the default data rate for %s: %w", reg.CommonName(), err)
+		}
+		o.dataRate = datr
+	}
+	return nil
+}
+
+// joinRegions lists the implemented bands for a flag's usage text.
+func joinRegions() string {
+	return strings.Join(region.Names(), ", ")
+}
+
 func run(o options) error {
 	// Validating the band up front means a typo is reported as a bad flag rather
 	// than as a mysterious rejection later.
-	if _, err := region.New(o.region); err != nil {
+	reg, err := region.New(o.region)
+	if err != nil {
 		return err
 	}
+	// Fill in the radio settings the band implies, so pointing the tool at
+	// another band needs one flag instead of three that have to agree.
+	if err := o.resolveUplink(reg); err != nil {
+		return err
+	}
+	fmt.Printf("region %s: uplink %.3f MHz at %s\n", reg.CommonName(), o.uplinkFreq, o.dataRate)
+
 	gwEUI, err := lorawan.ParseEUI64(o.gatewayEUI)
 	if err != nil {
 		return fmt.Errorf("-gateway-eui: %w", err)

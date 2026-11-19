@@ -25,11 +25,27 @@ export const EUI_HEX_DIGITS = 16
 export const APP_KEY_HEX_DIGITS = 32
 
 /**
- * Regions this console offers. It has to match what the API accepts and what the
- * network server was built with; the API is the authority and rejects anything
- * else, so this list only decides what can be picked without an error.
+ * Bands offered when the network server cannot be asked.
+ *
+ * The console normally reads the authoritative list from `GET /api/v1/regions`,
+ * which relays what the network server implements. This exists for the case where
+ * that read fails — a network server still starting, for instance — so the
+ * settings form offers bands instead of an empty dropdown.
+ *
+ * Keeping a copy is a deliberate trade: it can drift from the server's list, and
+ * the drift is harmless in the direction that matters, because the API validates
+ * against the server's own list and rejects anything it does not implement.
  */
-export const SUPPORTED_REGIONS = ['EU868', 'US915', 'AS923'] as const
+export const FALLBACK_REGIONS = ['US915', 'EU868', 'AS923', 'AS923-2', 'AS923-3', 'AS923-4'] as const
+
+/**
+ * The band a new facility starts on, matching the network server's default.
+ *
+ * It is a separate value from the list's first entry so that reordering the
+ * dropdown for readability cannot silently change what a fresh installation
+ * enforces.
+ */
+export const DEFAULT_REGION: string = 'US915'
 
 /**
  * Device-status filters, each with the value it filters on and the label shown.

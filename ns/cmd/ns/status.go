@@ -12,6 +12,7 @@ import (
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
 // statusServer is the operator-facing HTTP surface of the network server: a
@@ -109,6 +110,15 @@ type statusView struct {
 	GatewaysTotal  int           `json:"gateways_total"`
 	GatewaysOnline int           `json:"gateways_online"`
 	Gateways       []gatewayView `json:"gateways"`
+	// SupportedRegions is every band this build implements, in the order a
+	// console should offer them.
+	//
+	// It is published rather than duplicated downstream because a list kept in
+	// the console and another kept here drift: the console offered three bands
+	// while this server accepted six, and an operator could not record the band
+	// they were actually running. Anything added to region.Names() becomes
+	// configurable in the console with no further change.
+	SupportedRegions []string `json:"supported_regions"`
 	// Integrations reports the webhook dispatcher's counters, or nil when no
 	// endpoints are configured. A dropped count that keeps growing is the signal
 	// that a receiver is too slow, and this is where an operator sees it.
@@ -169,13 +179,14 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	cfg := s.eng.Config()
 	body := statusView{
-		UptimeSeconds:  now.Sub(s.started).Seconds(),
-		Region:         cfg.Region,
-		NetID:          cfg.NetID.String(),
-		DownlinkPower:  int(cfg.DownlinkPowerdBm),
-		GatewaysTotal:  len(views),
-		GatewaysOnline: s.gatews.GatewaysOnline(),
-		Gateways:       views,
+		UptimeSeconds:    now.Sub(s.started).Seconds(),
+		Region:           cfg.Region,
+		NetID:            cfg.NetID.String(),
+		DownlinkPower:    int(cfg.DownlinkPowerdBm),
+		GatewaysTotal:    len(views),
+		GatewaysOnline:   s.gatews.GatewaysOnline(),
+		Gateways:         views,
+		SupportedRegions: region.Names(),
 	}
 	if s.integr != nil {
 		st := s.integr.Stats()

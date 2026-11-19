@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
 // env seeds the environment for one config test and restores it afterwards.
@@ -37,8 +39,14 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.listenAddr != ":6858" {
 		t.Errorf("listenAddr = %q, want :6858 (the packet-forwarder port)", cfg.listenAddr)
 	}
-	if cfg.region != "EU868" || cfg.netID.String() != "000000" {
-		t.Errorf("region/NetID = %s/%s", cfg.region, cfg.netID)
+	// The band must follow the product default rather than a literal repeated
+	// here, so changing the deployment default is one edit instead of a hunt.
+	// TestDefaultRegionIsUS915 in the region package pins what that default is.
+	if cfg.region != region.DefaultRegion {
+		t.Errorf("region = %q, want the product default %q", cfg.region, region.DefaultRegion)
+	}
+	if cfg.netID.String() != "000000" {
+		t.Errorf("netID = %s, want 000000", cfg.netID)
 	}
 	if cfg.downlinkPowerdBm != 14 {
 		t.Errorf("downlinkPowerdBm = %d, want 14", cfg.downlinkPowerdBm)

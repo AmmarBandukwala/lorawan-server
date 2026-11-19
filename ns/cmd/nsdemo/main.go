@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
@@ -37,7 +38,8 @@ func (g *consoleGateway) SendDownlink(_ context.Context, f gateway.DownlinkFrame
 }
 
 func main() {
-	regionName := flag.String("region", "EU868", "regional band: EU868, US915, AS923, AS923-2, AS923-3, AS923-4")
+	regionName := flag.String("region", region.DefaultRegion,
+		"regional band; one of "+strings.Join(region.Names(), ", "))
 	quiet := flag.Bool("quiet", false, "only print the summary")
 	flag.Parse()
 

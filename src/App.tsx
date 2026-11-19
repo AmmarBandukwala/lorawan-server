@@ -6,9 +6,9 @@ import {
 import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
-import { fetchStatus, type NetworkStatus } from './features/network/control'
+import { fetchRegions, fetchStatus, type NetworkStatus, type RegionList } from './features/network/control'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
-import { REFRESH_INTERVAL_MS } from './features/network/constants'
+import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS } from './features/network/constants'
 import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
 import './App.css'
 
@@ -42,6 +42,11 @@ function App() {
   // dropped — that no table holds.
   const [selected, setSelected] = useState<Device | null>(null)
   const [status, setStatus] = useState<NetworkStatus | null>(null)
+
+  // The bands the settings form offers. Fetched once rather than on every poll:
+  // the list changes only when the network server is rebuilt, and the form is a
+  // rare visit compared with the dashboard's fifteen-second refresh.
+  const [regions, setRegions] = useState<RegionList | null>(null)
 
   // The newest snapshot, for merging a refresh into it. It is written only
   // where the snapshot changes — in the refresh and in patchSnapshot — so it
@@ -83,6 +88,18 @@ function App() {
     } finally {
       if (!controller.signal.aborted) setLoading(false)
     }
+  }, [])
+
+  // Asks the network server which bands it implements. A failure is not an
+  // error state: the form falls back to the console's own list and says so,
+  // because an operator should still be able to finish a facility profile while
+  // the network server is restarting.
+  useEffect(() => {
+    let active = true
+    fetchRegions()
+      .then((list) => { if (active) setRegions(list) })
+      .catch(() => { if (active) setRegions(null) })
+    return () => { active = false }
   }, [])
 
   // Keeps the ref and the state in step. A refresh merges into snapshotRef, so a
@@ -229,7 +246,7 @@ function App() {
             {!status && <div className="panel integration-panel"><b>No health report from the network server.</b><span> Gateway presence, duty-cycle occupancy and integration counters need the network server reachable.</span></div>}
           </section>}
           {view === 'Events' && <section className="panel event-view"><div className="panel-heading"><div><h2>Network events</h2><p>Recent activity from your local network</p></div><span className="select-button">Most recent</span></div><div className="activity-list event-list">{events.map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></section>}
-          {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} />}
+          {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} regions={regions?.regions ?? FALLBACK_REGIONS} regionsAreFallback={regions === null || regions.source === 'fallback'} />}
 
           <footer className="page-footer"><span>FIELDNODE NETWORK SERVER</span><span><span className={`status-indicator ${connection === 'connected' ? 'green' : ''}`} />{connection === 'connected' ? 'Inventory API connected' : connection === 'loading' ? 'Connecting to API' : connection === 'degraded' ? failedLabel : 'API disconnected'}</span></footer>
         </div>

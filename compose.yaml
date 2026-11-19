@@ -46,7 +46,11 @@ services:
       NS_LISTEN_ADDR: :6858
       NS_STATUS_ADDR: :8090
       NS_API_ADDR: :8091
-      NS_REGION: ${NETWORK_REGION:-EU868}
+      # The band the network runs on. Unset here means US915, which the network
+      # server also falls back to; naming it explicitly in .env is still the
+      # right move for a deployment, because the band is a regulatory setting
+      # that should never be an accident.
+      NS_REGION: ${NETWORK_REGION:-US915}
       NS_NET_ID: ${NETWORK_NET_ID:?Set NETWORK_NET_ID in .env to a 6-hex-digit NetID}
       NS_DATABASE_URL: postgres://fieldnode:${POSTGRES_PASSWORD}@db:5432/fieldnode?sslmode=disable
       NS_API_TOKEN: ${NS_API_TOKEN:?Set NS_API_TOKEN in .env (at least 16 characters)}
@@ -57,8 +61,11 @@ services:
       # simulator.
       - "${NS_GATEWAY_BIND_ADDRESS:-0.0.0.0}:${NS_GATEWAY_PORT:-6858}:6858/udp"
       # Status and application API stay on loopback: they are for this host's
-      # operator and for the api service on the internal network.
+      # operator and for the api service on the internal network. Both are
+      # published, because the operator's curl examples and the nsbench smoke run
+      # talk to them by host port; neither is reachable from the LAN.
       - "127.0.0.1:${NS_STATUS_PORT:-8090}:8090"
+      - "127.0.0.1:${NS_API_PORT:-8091}:8091"
     depends_on:
       db:
         condition: service_healthy

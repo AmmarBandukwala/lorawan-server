@@ -47,8 +47,13 @@ func newEU868() *eu868 {
 			9:  rfhss(9, "4/6", 137_000),
 			10: rfhss(10, "2/6", 336_000),
 			11: rfhss(11, "4/6", 336_000),
-			12: lora(12, 6),
-			13: lora(13, 5),
+			// DR12 and DR13 are RFU in RP002 for this band. lrwn's RX1 table has
+			// rows for them, so they stay defined and decodable, but they are
+			// deliberately not marked downlink-capable: scheduling a downlink at
+			// a reserved rate, with no maximum payload size defined anywhere, is
+			// a frame the device can only discard.
+			12: {Index: 12, Uplink: true, Downlink: false, Modulation: ModulationLoRa, SpreadingFactor: 6, BandwidthHz: 125_000, CodingRate: "4/5"},
+			13: {Index: 13, Uplink: true, Downlink: false, Modulation: ModulationLoRa, SpreadingFactor: 5, BandwidthHz: 125_000, CodingRate: "4/5"},
 		},
 		// lrwn eu868.rs rx1_data_rate_table (offsets 0..5; 6-7 are RFU).
 		rx1DataTable: map[int][]int{
@@ -82,7 +87,17 @@ func newEU868() *eu868 {
 		},
 		subBands: eu868SubBands,
 		// RP002-403 MPDS for EU868 downlink DR0..DR5 (SF12..SF7, 125 kHz).
-		maxDownlinkPL: map[int]int{0: 59, 1: 59, 2: 59, 3: 123, 4: 255, 5: 255},
+		// Maximum downlink PHY-payload size per data rate, transcribed from
+		// lrwn's max_dl_payload_size_per_dr (m, the full MHDR+FHDR+FRMPayload+MIC
+		// size, not the FRMPayload alone).
+		//
+		// DR6 (SF7BW250) and DR7 (FSK 50 kbit) are downlink-capable in this band
+		// and must be listed: a missing entry reads as "cannot carry anything",
+		// which would silently cost the device its fastest downlinks.
+		//
+		// DR8..DR11 are LR-FHSS uplink rates and DR12/DR13 are reserved, so they
+		// have no downlink entry at all.
+		maxDownlinkPL: map[int]int{0: 59, 1: 59, 2: 59, 3: 123, 4: 230, 5: 230, 6: 230, 7: 230},
 		rx1SameFreq:   true,
 	}}
 }
