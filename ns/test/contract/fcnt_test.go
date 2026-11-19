@@ -1,6 +1,10 @@
-package lorawan
+package contract_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
+)
 
 // TestFullFCnt pins the counter reconstruction across rollover and
 // re-transmission. The table is deliberately exhaustive rather than illustrative:
@@ -24,7 +28,7 @@ func TestFullFCnt(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := FullFCnt(tc.next, uint16(tc.truncated)); got != tc.want {
+			if got := lorawan.FullFCnt(tc.next, uint16(tc.truncated)); got != tc.want {
 				t.Errorf("FullFCnt(%d, %d) = %d, want %d", tc.next, tc.truncated, got, tc.want)
 			}
 		})

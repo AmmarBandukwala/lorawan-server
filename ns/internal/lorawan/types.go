@@ -15,6 +15,15 @@ import (
 	"strings"
 )
 
+// MaxJoinNonce is the largest JoinNonce (called AppNonce on the wire) a network
+// server may hand out: the field is 24 bits in the join-accept, and the same 24
+// bits are fed into the session-key derivation.
+//
+// Named once because three separate checks depend on it agreeing — the key
+// derivation, the join-accept marshalling and the server's own counter — and a
+// disagreement would mean deriving keys for a nonce a device cannot reproduce.
+const MaxJoinNonce = 0xFFFFFF
+
 // AES128Key is a 128-bit AES key used for all LoRaWAN crypto operations.
 type AES128Key [16]byte
 

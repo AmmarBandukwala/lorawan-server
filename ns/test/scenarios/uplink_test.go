@@ -1,9 +1,12 @@
-package engine
+package scenarios_test
 
 import (
 	"bytes"
 	"context"
 	"testing"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/engine"
+	"github.com/fieldnode/lorawan-server/ns/test/testenv"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
@@ -11,18 +14,18 @@ import (
 )
 
 func TestUplinkDecryptsAndDownlinkIsAcknowledged(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
 	// A plain uplink with nothing queued must not produce a downlink: class-A
 	// devices get no gratuitous frames.
-	env.uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("hello fieldnode")}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("hello fieldnode")}, gateway.RxWindow1)
 
-	uplinks := env.store.Uplinks()
+	uplinks := env.Store.Uplinks()
 	if len(uplinks) != 1 {
 		t.Fatalf("recorded uplinks = %d, want 1", len(uplinks))
 	}
@@ -38,21 +41,21 @@ func TestUplinkDecryptsAndDownlinkIsAcknowledged(t *testing.T) {
 	if uplinks[0].RSSI != -72 || uplinks[0].SNR != 8.5 {
 		t.Errorf("radio metadata = %f/%f, want -72/8.5", uplinks[0].RSSI, uplinks[0].SNR)
 	}
-	if frames := env.gw.frames(); len(frames) != 0 {
+	if frames := env.GW.Frames(); len(frames) != 0 {
 		t.Errorf("uplink with nothing queued produced %d downlink(s), want 0", len(frames))
 	}
-	if ses := env.session(devEUI); ses.FCntUp != 1 {
+	if ses := env.Session(devEUI); ses.FCntUp != 1 {
 		t.Errorf("session FCntUp = %d, want 1 (next expected)", ses.FCntUp)
 	}
 
 	// Queue an application downlink; it must ride the next uplink's RX window.
-	if err := env.eng.EnqueueDownlink(ctx, devEUI, 10, []byte("pump to 60%"), false); err != nil {
+	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, []byte("pump to 60%"), false); err != nil {
 		t.Fatalf("EnqueueDownlink: %v", err)
 	}
-	env.gw.reset()
-	env.uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("2")}, gateway.RxWindow1)
+	env.GW.Reset()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("2")}, gateway.RxWindow1)
 
-	frames := env.gw.frames()
+	frames := env.GW.Frames()
 	if len(frames) != 2 {
 		t.Fatalf("the downlink should go to RX1 and RX2, got %d frames", len(frames))
 	}
@@ -71,32 +74,32 @@ func TestUplinkDecryptsAndDownlinkIsAcknowledged(t *testing.T) {
 	}
 
 	// The device acknowledges by setting FCtrl.ACK on its next uplink.
-	env.gw.reset()
-	env.uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("3"), ACK: true}, gateway.RxWindow1)
+	env.GW.Reset()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("3"), ACK: true}, gateway.RxWindow1)
 
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if ses.Pending != nil {
 		t.Errorf("pending downlink survived the acknowledgement: %+v", ses.Pending)
 	}
 	if ses.AFCntDown == 0 {
 		t.Error("AFCntDown was not recorded from the ACK bit")
 	}
-	if frames := env.gw.frames(); len(frames) != 0 {
+	if frames := env.GW.Frames(); len(frames) != 0 {
 		t.Errorf("after the ack the engine sent %d frame(s), want 0", len(frames))
 	}
 }
 
 func TestConfirmedUplinkIsAcknowledged(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
-	env.uplink(simDev, sim.UplinkOptions{FPort: 3, Payload: []byte("alarm"), Confirmed: true}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 3, Payload: []byte("alarm"), Confirmed: true}, gateway.RxWindow1)
 
-	frames := env.gw.frames()
+	frames := env.GW.Frames()
 	if len(frames) == 0 {
-		t.Fatalf("a confirmed uplink must be acknowledged; events: %+v", env.store.Events())
+		t.Fatalf("a confirmed uplink must be acknowledged; events: %+v", env.Store.Events())
 	}
 	dl, err := simDev.HandleDownlink(frames[0].PHYPayload)
 	if err != nil {
@@ -108,27 +111,27 @@ func TestConfirmedUplinkIsAcknowledged(t *testing.T) {
 	if dl.FPort != -1 {
 		t.Errorf("a pure ACK frame should carry no FPort, got %d", dl.FPort)
 	}
-	if up := env.store.Uplinks(); len(up) == 0 || !up[len(up)-1].Confirmed {
+	if up := env.Store.Uplinks(); len(up) == 0 || !up[len(up)-1].Confirmed {
 		t.Error("the uplink was not recorded as confirmed")
 	}
 }
 
 func TestDeviceStatusRoundTrip(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
-	if err := env.eng.RequestDeviceStatus(ctx, devEUI); err != nil {
+	if err := env.Engine.RequestDeviceStatus(ctx, devEUI); err != nil {
 		t.Fatalf("RequestDeviceStatus: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
 
-	frames := env.gw.frames()
+	frames := env.GW.Frames()
 	if len(frames) == 0 {
-		t.Fatalf("no DevStatusReq scheduled; events: %+v", env.store.Events())
+		t.Fatalf("no DevStatusReq scheduled; events: %+v", env.Store.Events())
 	}
 	dl, err := simDev.HandleDownlink(frames[0].PHYPayload)
 	if err != nil {
@@ -138,10 +141,10 @@ func TestDeviceStatusRoundTrip(t *testing.T) {
 		t.Fatalf("downlink MAC commands = %+v, want a single DevStatusReq", dl.MACCommands)
 	}
 
-	env.gw.reset()
+	env.GW.Reset()
 	// The answer rides in FOpts (NoFPort), the common case for a MAC-only
 	// uplink.
-	env.uplink(simDev, sim.UplinkOptions{
+	env.Uplink(simDev, sim.UplinkOptions{
 		NoFPort: true,
 		MACCommands: lorawan.MACCommandSet{{
 			CID:     lorawan.CIDDevStatus,
@@ -149,7 +152,7 @@ func TestDeviceStatusRoundTrip(t *testing.T) {
 		}},
 	}, gateway.RxWindow1)
 
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if !ses.HasDeviceStatus {
 		t.Fatal("device status was not recorded on the session")
 	}
@@ -159,22 +162,22 @@ func TestDeviceStatusRoundTrip(t *testing.T) {
 }
 
 func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
 	// EU868: DR3 is an uplink data-rate and TX index 2 exists.
-	if err := env.eng.RequestLinkADR(ctx, devEUI, 3, 2, 1, 0x00FF, 0); err != nil {
+	if err := env.Engine.RequestLinkADR(ctx, devEUI, 3, 2, 1, 0x00FF, 0); err != nil {
 		t.Fatalf("RequestLinkADR: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
 
-	frames := env.gw.frames()
+	frames := env.GW.Frames()
 	if len(frames) == 0 {
-		t.Fatalf("no LinkADRReq scheduled; events: %+v", env.store.Events())
+		t.Fatalf("no LinkADRReq scheduled; events: %+v", env.Store.Events())
 	}
 	dl, err := simDev.HandleDownlink(frames[0].PHYPayload)
 	if err != nil {
@@ -192,14 +195,14 @@ func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
 	}
 
 	// Until the device answers, the server must not assume the new parameters.
-	if ses := env.session(devEUI); ses.DataRate == 3 {
+	if ses := env.Session(devEUI); ses.DataRate == 3 {
 		t.Error("the data-rate changed before the device acknowledged it")
 	}
 
-	env.gw.reset()
+	env.GW.Reset()
 	// This answer deliberately uses the other transport: FPort 0 with the
 	// commands encrypted inside the FRMPayload instead of FOpts.
-	env.uplink(simDev, sim.UplinkOptions{
+	env.Uplink(simDev, sim.UplinkOptions{
 		MACCommands: lorawan.MACCommandSet{{
 			CID: lorawan.CIDLinkADR,
 			Payload: lorawan.LinkADRAnsPayload{
@@ -208,7 +211,7 @@ func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
 		}},
 	}, gateway.RxWindow1)
 
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if ses.DataRate != 3 || ses.TxPower != 2 || ses.NbTrans != 1 {
 		t.Errorf("after LinkADRAns session = DR%d TX%d NbTrans%d, want DR3 TX2 NbTrans1",
 			ses.DataRate, ses.TxPower, ses.NbTrans)
@@ -219,60 +222,60 @@ func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
 }
 
 func TestLinkADRRefusalKeepsParameters(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	before := env.session(devEUI)
+	simDev, _ := env.Join()
+	before := env.Session(devEUI)
 
-	if err := env.eng.RequestLinkADR(ctx, devEUI, 3, 2, 1, 0x00FF, 0); err != nil {
+	if err := env.Engine.RequestLinkADR(ctx, devEUI, 3, 2, 1, 0x00FF, 0); err != nil {
 		t.Fatalf("RequestLinkADR: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
 
 	// The device refuses: every status bit cleared.
-	env.uplink(simDev, sim.UplinkOptions{
+	env.Uplink(simDev, sim.UplinkOptions{
 		NoFPort:     true,
 		MACCommands: lorawan.MACCommandSet{{CID: lorawan.CIDLinkADR, Payload: []byte{0x00}}},
 	}, gateway.RxWindow1)
 
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if ses.DataRate != before.DataRate || ses.TxPower != before.TxPower {
 		t.Errorf("a refused ADR changed the session: DR%d TX%d, want DR%d TX%d",
 			ses.DataRate, ses.TxPower, before.DataRate, before.TxPower)
 	}
-	if len(env.store.EventsWithReason("link_adr_rejected")) != 1 {
-		t.Errorf("want one link_adr_rejected event, got %+v", env.store.Events())
+	if len(env.Store.EventsWithReason("link_adr_rejected")) != 1 {
+		t.Errorf("want one link_adr_rejected event, got %+v", env.Store.Events())
 	}
 }
 
 func TestABPUplink(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
 
-	dev := env.provision(false)
-	ses := &Session{
+	dev := env.Provision(false)
+	ses := &engine.Session{
 		DevEUI: dev.DevEUI, DevAddr: dev.DevAddr,
 		NwkSKey: dev.NwkSKey, AppSKey: dev.AppSKey,
 		KeyEpoch: 1, Region: "EU868",
-		DataRate: eu868DR5, TxPower: 0, NbTrans: 1,
-		Rx2DataRate: UseRegionDefault,
+		DataRate: testenv.EU868DR5, TxPower: 0, NbTrans: 1,
+		Rx2DataRate: engine.UseRegionDefault,
 	}
-	if err := env.store.SaveSession(ctx, ses); err != nil {
+	if err := env.Store.SaveSession(ctx, ses); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
 	simDev := &sim.Device{
-		DevEUI: dev.DevEUI, JoinEUI: dev.JoinEUI, NetID: env.eng.Config().NetID,
+		DevEUI: dev.DevEUI, JoinEUI: dev.JoinEUI, NetID: env.Engine.Config().NetID,
 		Joined: true, DevAddr: dev.DevAddr, NwkSKey: dev.NwkSKey, AppSKey: dev.AppSKey,
 	}
 
-	env.uplink(simDev, sim.UplinkOptions{FPort: 2, Payload: []byte("abp boot")}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 2, Payload: []byte("abp boot")}, gateway.RxWindow1)
 
-	uplinks := env.store.Uplinks()
+	uplinks := env.Store.Uplinks()
 	if len(uplinks) != 1 {
-		t.Fatalf("recorded uplinks = %d, want 1; events: %+v", len(uplinks), env.store.Events())
+		t.Fatalf("recorded uplinks = %d, want 1; events: %+v", len(uplinks), env.Store.Events())
 	}
 	if got := string(uplinks[0].FRMPayload); got != "abp boot" {
 		t.Errorf("ABP payload = %q, want %q", got, "abp boot")
@@ -283,28 +286,28 @@ func TestABPUplink(t *testing.T) {
 }
 
 func TestUplinkUnknownDevAddr(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
 	// A frame addressed to an address no session owns.
-	simDev.DevAddr = mustDevAddr(t, "deadbeef")
+	simDev.DevAddr = testenv.MustDevAddr(t, "deadbeef")
 	wire, err := simDev.NextUplink(sim.UplinkOptions{FPort: 1, Payload: []byte("x")})
 	if err != nil {
 		t.Fatalf("NextUplink: %v", err)
 	}
-	if err := env.uplinkWire(wire); err != nil {
+	if err := env.UplinkWire(wire); err != nil {
 		t.Fatalf("HandleUplink: %v", err)
 	}
 
-	if frames := env.gw.frames(); len(frames) != 0 {
+	if frames := env.GW.Frames(); len(frames) != 0 {
 		t.Errorf("an unknown DevAddr produced %d downlink(s), want 0", len(frames))
 	}
-	if len(env.store.EventsWithReason(ReasonUnknownDevAddr)) != 1 {
-		t.Errorf("want one %s event, got %+v", ReasonUnknownDevAddr, env.store.Events())
+	if len(env.Store.EventsWithReason(engine.ReasonUnknownDevAddr)) != 1 {
+		t.Errorf("want one %s event, got %+v", engine.ReasonUnknownDevAddr, env.Store.Events())
 	}
-	if len(env.store.Uplinks()) != 0 {
+	if len(env.Store.Uplinks()) != 0 {
 		t.Error("an unknown DevAddr must not be recorded as traffic")
 	}
 }
@@ -315,11 +318,11 @@ func TestUplinkUnknownDevAddr(t *testing.T) {
 // against a lenient simulator, but drops every real device's MAC commands — so
 // this asserts both the ciphertext on the wire and the decoded result.
 func TestUplinkFOptsAreEncryptedOnTheWire(t *testing.T) {
-	env := newTestEnv(t, nil)
-	devEUI := mustEUI64(t, testDevEUI)
+	env := testenv.New(t, nil)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
 	ans := lorawan.MACCommandSet{{
 		CID:     lorawan.CIDDevStatus,
@@ -346,12 +349,12 @@ func TestUplinkFOptsAreEncryptedOnTheWire(t *testing.T) {
 		t.Fatal("FOpts went out in cleartext; 1.0.x §4.3.3 requires NwkSKey encryption")
 	}
 
-	if err := env.uplinkWire(wire); err != nil {
+	if err := env.UplinkWire(wire); err != nil {
 		t.Fatalf("HandleUplink: %v", err)
 	}
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if !ses.HasDeviceStatus {
-		t.Fatalf("encrypted FOpts were not decoded; events: %+v", env.store.Events())
+		t.Fatalf("encrypted FOpts were not decoded; events: %+v", env.Store.Events())
 	}
 	if ses.Battery != 210 || ses.Margin != 7 {
 		t.Errorf("device status = battery %d margin %d, want 210/7", ses.Battery, ses.Margin)
@@ -363,21 +366,21 @@ func TestUplinkFOptsAreEncryptedOnTheWire(t *testing.T) {
 // default DR0 (59 bytes). A 200-byte payload fits RX1 only, so exactly one
 // transmission may be scheduled and the reason must be recorded.
 func TestDownlinkSkipsWindowThatCannotCarryIt(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
-	env.gw.reset()
+	simDev, _ := env.Join()
+	env.GW.Reset()
 
-	if err := env.eng.EnqueueDownlink(ctx, devEUI, 10, bytes.Repeat([]byte("f"), 200), false); err != nil {
+	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, bytes.Repeat([]byte("f"), 200), false); err != nil {
 		t.Fatalf("EnqueueDownlink: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
+	env.Uplink(simDev, sim.UplinkOptions{NoFPort: true}, gateway.RxWindow1)
 
-	frames := env.gw.frames()
+	frames := env.GW.Frames()
 	if len(frames) != 1 {
-		t.Fatalf("scheduled %d frame(s), want 1 (RX1 only); events: %+v", len(frames), env.store.Events())
+		t.Fatalf("scheduled %d frame(s), want 1 (RX1 only); events: %+v", len(frames), env.Store.Events())
 	}
 	if frames[0].Window != gateway.RxWindow1 {
 		t.Errorf("window = %s, want RX1", frames[0].Window)
@@ -385,8 +388,8 @@ func TestDownlinkSkipsWindowThatCannotCarryIt(t *testing.T) {
 	if n := len(frames[0].PHYPayload); n <= 59 {
 		t.Errorf("frame is %d bytes; it no longer exceeds the RX2 limit, so this test proves nothing", n)
 	}
-	if len(env.store.EventsWithReason(ReasonDownlinkTooLarge)) != 1 {
-		t.Errorf("want one %s event, got %+v", ReasonDownlinkTooLarge, env.store.Events())
+	if len(env.Store.EventsWithReason(engine.ReasonDownlinkTooLarge)) != 1 {
+		t.Errorf("want one %s event, got %+v", engine.ReasonDownlinkTooLarge, env.Store.Events())
 	}
 }
 
@@ -395,16 +398,16 @@ func TestDownlinkSkipsWindowThatCannotCarryIt(t *testing.T) {
 // (SF6/SF5) in its data-rate table, but its regional parameters cap ordinary
 // uplink ADR at DR5, so a real device would only answer in the negative.
 func TestLinkADRRejectsDataRateOutsideBandRange(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	env.join()
+	env.Join()
 
-	if err := env.eng.RequestLinkADR(ctx, devEUI, 13, 2, 1, 0x00FF, 0); err == nil {
+	if err := env.Engine.RequestLinkADR(ctx, devEUI, 13, 2, 1, 0x00FF, 0); err == nil {
 		t.Error("RequestLinkADR accepted DR13 on EU868, above the band ceiling of DR5")
 	}
-	if err := env.eng.RequestLinkADR(ctx, devEUI, 5, 2, 1, 0x00FF, 0); err != nil {
+	if err := env.Engine.RequestLinkADR(ctx, devEUI, 5, 2, 1, 0x00FF, 0); err != nil {
 		t.Errorf("RequestLinkADR(DR5), the band ceiling, failed: %v", err)
 	}
 }

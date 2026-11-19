@@ -1,13 +1,15 @@
-package region
+package contract_test
 
 import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
 func TestEU868SubBands(t *testing.T) {
-	r, err := New("EU868")
+	r, err := region.New("EU868")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -52,7 +54,7 @@ func TestEU868SubBands(t *testing.T) {
 // 1% duty cycle buys 36 seconds of transmission per hour, and how many frames
 // that is depends entirely on their data rate.
 func TestSubBandBudgetIsInTimeNotPackets(t *testing.T) {
-	r, _ := New("EU868")
+	r, _ := region.New("EU868")
 	window := time.Hour
 
 	for _, tc := range []struct {
@@ -78,7 +80,7 @@ func TestSubBandBudgetIsInTimeNotPackets(t *testing.T) {
 	// needs when a deployment grows past it.
 	sb, _ := r.SubBandFor(868_100_000)
 	dr, _ := r.DataRate(0)
-	toa, err := TimeOnAir(dr, 17) // join-accept length
+	toa, err := region.TimeOnAir(dr, 17) // join-accept length
 	if err != nil {
 		t.Fatalf("TimeOnAir: %v", err)
 	}
@@ -91,7 +93,7 @@ func TestSubBandBudgetIsInTimeNotPackets(t *testing.T) {
 }
 
 func TestUS915SubBandsAreUnlimited(t *testing.T) {
-	r, _ := New("US915")
+	r, _ := region.New("US915")
 	for _, freq := range []uint32{903_000_000, 914_899_999, 923_900_000, 927_499_999} {
 		sb, ok := r.SubBandFor(freq)
 		if !ok {
@@ -116,18 +118,18 @@ func TestUS915SubBandsAreUnlimited(t *testing.T) {
 // variant's own RX2 channel as "outside the band" while permitting a frequency
 // nobody is allowed to use.
 func TestAS923VariantsShiftTheSubBand(t *testing.T) {
-	base, err := New("AS923")
+	base, err := region.New("AS923")
 	if err != nil {
-		t.Fatalf("New(AS923): %v", err)
+		t.Fatalf("region.New(AS923): %v", err)
 	}
 	if sb, ok := base.SubBandFor(923_200_000); !ok || sb.DutyCycle != 0.01 {
 		t.Errorf("AS923 RX2 923.2 MHz = %+v (found=%v), want the 1%% range", sb, ok)
 	}
 
 	// AS923-2 shifts everything down by 1.8 MHz, taking its RX2 to 921.4 MHz.
-	js1, err := New("AS923-2")
+	js1, err := region.New("AS923-2")
 	if err != nil {
-		t.Fatalf("New(AS923-2): %v", err)
+		t.Fatalf("region.New(AS923-2): %v", err)
 	}
 	if sb, ok := js1.SubBandFor(921_400_000); !ok || sb.DutyCycle != 0.01 {
 		t.Errorf("AS923-2 RX2 921.4 MHz = %+v (found=%v), want the shifted 1%% range", sb, ok)
@@ -138,7 +140,7 @@ func TestAS923VariantsShiftTheSubBand(t *testing.T) {
 }
 
 func TestSubBandString(t *testing.T) {
-	r, _ := New("EU868")
+	r, _ := region.New("EU868")
 	sb, ok := r.SubBandFor(869_525_000)
 	if !ok {
 		t.Fatal("no sub-band at 869.525 MHz")
@@ -156,9 +158,9 @@ func TestSubBandString(t *testing.T) {
 // which limit applies.
 func TestSubBandsDoNotOverlap(t *testing.T) {
 	for _, name := range []string{"EU868", "US915", "AS923", "AS923-2", "AS923-3", "AS923-4"} {
-		r, err := New(name)
+		r, err := region.New(name)
 		if err != nil {
-			t.Fatalf("New(%s): %v", name, err)
+			t.Fatalf("region.New(%s): %v", name, err)
 		}
 		bands := r.SubBands()
 		if len(bands) == 0 {

@@ -11,6 +11,22 @@ import (
 	"time"
 )
 
+// Webhook delivery defaults, applied when the corresponding WebhookConfig field
+// is left at its zero value.
+const (
+	// DefaultWebhookTimeout bounds one attempt. It has to be long enough for a
+	// receiver that does real work and short enough that a dead endpoint cannot
+	// hold a delivery worker for long.
+	DefaultWebhookTimeout = 5 * time.Second
+	// DefaultWebhookAttempts counts the first try, so this is two retries:
+	// enough to ride out a restart of the receiver, few enough that one slow
+	// endpoint cannot stall the queue behind it.
+	DefaultWebhookAttempts = 3
+	// DefaultWebhookBackoff is the first wait between attempts, doubling after
+	// each one.
+	DefaultWebhookBackoff = time.Second
+)
+
 // WebhookConfig configures an HTTP sink.
 type WebhookConfig struct {
 	// URL is where events are POSTed, as JSON.
@@ -22,16 +38,17 @@ type WebhookConfig struct {
 	// is an invitation to forge device traffic.
 	Token string
 
-	// Timeout bounds one attempt. The zero value means 5s.
+	// Timeout bounds one attempt. The zero value means DefaultWebhookTimeout.
 	Timeout time.Duration
 
 	// Attempts is how many times one event is tried, including the first. The
-	// zero value means 3. Retries happen inside Publish, so they hold a worker
-	// and delay what is behind it — which is the tradeoff for not losing events
-	// across a short outage.
+	// zero value means DefaultWebhookAttempts. Retries happen inside Publish, so
+	// they hold a worker and delay what is behind it — which is the tradeoff for
+	// not losing events across a short outage.
 	Attempts int
 
-	// Backoff is the wait between attempts, doubling each time. Zero means 1s.
+	// Backoff is the wait between attempts, doubling each time. Zero means
+	// DefaultWebhookBackoff.
 	Backoff time.Duration
 
 	// Client is used when set. Injecting it lets a deployment point the webhook
@@ -74,13 +91,13 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 		host:     u.Host,
 	}
 	if w.timeout <= 0 {
-		w.timeout = 5 * time.Second
+		w.timeout = DefaultWebhookTimeout
 	}
 	if w.attempts <= 0 {
-		w.attempts = 3
+		w.attempts = DefaultWebhookAttempts
 	}
 	if w.backoff <= 0 {
-		w.backoff = time.Second
+		w.backoff = DefaultWebhookBackoff
 	}
 	w.client = cfg.Client
 	if w.client == nil {

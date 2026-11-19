@@ -166,12 +166,12 @@ func (s *apiServer) handleEnqueueDownlink(w http.ResponseWriter, r *http.Request
 		"bytes", len(payload), "confirmed", confirmed)
 
 	// 202, not 200: the frame is accepted for the next window, not transmitted.
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"dev_eui":     devEUI.String(),
-		"queued":      true,
-		"f_port":      *req.FPort,
-		"confirmed":   confirmed,
-		"explanation": "the frame goes out in the device's next RX window",
+	writeJSON(w, http.StatusAccepted, downlinkQueuedResponse{
+		DevEUI:      devEUI.String(),
+		Queued:      true,
+		FPort:       int(*req.FPort),
+		Confirmed:   confirmed,
+		Explanation: queuedExplanation,
 	})
 }
 
@@ -184,7 +184,10 @@ func (s *apiServer) handleCancelDownlink(w http.ResponseWriter, r *http.Request)
 		s.writeEngineError(w, devEUI, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"dev_eui": devEUI.String(), "cancelled": true})
+	writeJSON(w, http.StatusOK, downlinkCancelledResponse{
+		DevEUI:    devEUI.String(),
+		Cancelled: true,
+	})
 }
 
 func (s *apiServer) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {
@@ -196,8 +199,9 @@ func (s *apiServer) handleDeviceStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeEngineError(w, devEUI, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"dev_eui": devEUI.String(), "scheduled": true,
+	writeJSON(w, http.StatusAccepted, deviceStatusScheduledResponse{
+		DevEUI:    devEUI.String(),
+		Scheduled: true,
 	})
 }
 
@@ -216,43 +220,43 @@ func (s *apiServer) handleSession(w http.ResponseWriter, r *http.Request) {
 		s.writeEngineError(w, devEUI, err)
 		return
 	}
-	view := map[string]any{
-		"dev_eui":          devEUI.String(),
-		"dev_addr":         ses.DevAddr.String(),
-		"region":           ses.Region,
-		"f_cnt_up":         ses.FCntUp,
-		"f_cnt_down":       ses.FCntDown,
-		"data_rate":        ses.DataRate,
-		"tx_power_index":   ses.TxPower,
-		"nb_trans":         ses.NbTrans,
-		"adr":              ses.LastADRBit,
-		"rx1_delay":        ses.Rx1Delay,
-		"rx1_dr_offset":    ses.Rx1DROffset,
-		"rx2_frequency_hz": ses.Rx2FrequencyHz,
-		"rx2_data_rate":    ses.Rx2DataRate,
-		"duty_cycle":       ses.DutyCycle,
-		"last_rssi":        ses.LastRSSI,
-		"last_snr":         ses.LastSNR,
+	view := sessionResponse{
+		DevEUI:         devEUI.String(),
+		DevAddr:        ses.DevAddr.String(),
+		Region:         ses.Region,
+		FCntUp:         ses.FCntUp,
+		FCntDown:       ses.FCntDown,
+		DataRate:       ses.DataRate,
+		TxPowerIndex:   ses.TxPower,
+		NbTrans:        ses.NbTrans,
+		ADR:            ses.LastADRBit,
+		Rx1Delay:       ses.Rx1Delay,
+		Rx1DROffset:    ses.Rx1DROffset,
+		Rx2FrequencyHz: ses.Rx2FrequencyHz,
+		Rx2DataRate:    ses.Rx2DataRate,
+		DutyCycle:      ses.DutyCycle,
+		LastRSSI:       ses.LastRSSI,
+		LastSNR:        ses.LastSNR,
 	}
 	if !ses.LastUplinkAt.IsZero() {
-		view["last_uplink_at"] = ses.LastUplinkAt
+		at := ses.LastUplinkAt
+		view.LastUplinkAt = &at
 	}
 	if ses.HasDeviceStatus {
-		view["battery"] = ses.Battery
-		view["margin_db"] = ses.Margin
+		battery, margin := int(ses.Battery), int(ses.Margin)
+		view.Battery, view.MarginDB = &battery, &margin
 	}
 	if ses.Pending != nil {
-		pending := map[string]any{"confirmed": ses.Pending.Confirmed}
+		pending := pendingDownlinkResponse{Confirmed: ses.Pending.Confirmed}
 		if ses.Pending.FPort != nil {
-			pending["f_port"] = int(*ses.Pending.FPort)
+			fPort := int(*ses.Pending.FPort)
+			pending.FPort = &fPort
 		}
 		if len(ses.Pending.FRMPayload) > 0 {
-			pending["data"] = hex.EncodeToString(ses.Pending.FRMPayload)
+			pending.Data = hex.EncodeToString(ses.Pending.FRMPayload)
 		}
-		if n := len(ses.Pending.MACCommands); n > 0 {
-			pending["mac_commands"] = n
-		}
-		view["pending_downlink"] = pending
+		pending.MACCommands = len(ses.Pending.MACCommands)
+		view.Pending = &pending
 	}
 	writeJSON(w, http.StatusOK, view)
 }

@@ -1,14 +1,16 @@
-package lorawan
+package contract_test
 
 import (
 	"encoding/hex"
 	"testing"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 )
 
 // RFC 4493 Appendix B.1 test vectors for AES-128-CMAC (key
 // 2b7e151628aed2a6abf7158809cf4f3c).
 func TestAES128CMAC_RFC4493(t *testing.T) {
-	key, err := ParseAES128Key("2b7e151628aed2a6abf7158809cf4f3c")
+	key, err := lorawan.ParseAES128Key("2b7e151628aed2a6abf7158809cf4f3c")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +28,7 @@ func TestAES128CMAC_RFC4493(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := AES128CMAC(key, msg)
+		got := lorawan.AES128CMAC(key, msg)
 		if gotHex := hex.EncodeToString(got[:]); gotHex != tc.want {
 			t.Errorf("CMAC(%s) = %s, want %s", tc.msg, gotHex, tc.want)
 		}

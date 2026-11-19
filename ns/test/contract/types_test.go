@@ -1,11 +1,15 @@
-package lorawan
+package contract_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
+)
 
 func TestFrequencyEncodeDecode(t *testing.T) {
 	// 868.1 MHz -> 8681000 (100 Hz steps) -> 0x847628 -> LE 28 76 84,
 	// the well-known first entry of the EU868 join-accept CFList.
-	got, err := EncodeFrequency(868_100_000)
+	got, err := lorawan.EncodeFrequency(868_100_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,11 +19,11 @@ func TestFrequencyEncodeDecode(t *testing.T) {
 	}
 
 	for _, hz := range []uint32{868_100_000, 869_525_000, 923_300_000, 902_300_000} {
-		enc, err := EncodeFrequency(hz)
+		enc, err := lorawan.EncodeFrequency(hz)
 		if err != nil {
 			t.Fatalf("EncodeFrequency(%d): %v", hz, err)
 		}
-		back, err := DecodeFrequency(enc[:])
+		back, err := lorawan.DecodeFrequency(enc[:])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -28,13 +32,13 @@ func TestFrequencyEncodeDecode(t *testing.T) {
 		}
 	}
 
-	if _, err := EncodeFrequency(868_100_001); err == nil {
+	if _, err := lorawan.EncodeFrequency(868_100_001); err == nil {
 		t.Error("expected error for non-100Hz multiple")
 	}
 }
 
 func TestEUI64WireOrder(t *testing.T) {
-	e, err := ParseEUI64("0807060504030201")
+	e, err := lorawan.ParseEUI64("0807060504030201")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +49,7 @@ func TestEUI64WireOrder(t *testing.T) {
 			t.Fatalf("BytesLE = %x, want %x", le, want)
 		}
 	}
-	back, err := EUI64FromBytesLE(le)
+	back, err := lorawan.EUI64FromBytesLE(le)
 	if err != nil || back != e {
 		t.Fatalf("round-trip failed: %v %v", back, err)
 	}

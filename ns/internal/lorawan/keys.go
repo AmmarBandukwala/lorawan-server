@@ -14,7 +14,7 @@ import "fmt"
 // Types used by LoRaWAN 1.0: 0x01 NwkSKey, 0x02 AppSKey. (1.1 defines
 // 0x03..0x06 as well; kept here so enabling 1.1 later is additive.)
 func DeriveSessionKey(appKey AES128Key, typ byte, joinNonce uint32, netID NetID, devNonce uint16) (AES128Key, error) {
-	if joinNonce > 0xFFFFFF {
+	if joinNonce > MaxJoinNonce {
 		return AES128Key{}, fmt.Errorf("joinNonce %d exceeds 24 bits", joinNonce)
 	}
 	var b [16]byte

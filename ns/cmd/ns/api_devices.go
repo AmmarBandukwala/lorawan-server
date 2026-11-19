@@ -202,7 +202,7 @@ func (s *apiServer) handleListDevices(w http.ResponseWriter, r *http.Request) {
 	devices, err := s.devices.ListDevices(r.Context())
 	if err != nil {
 		s.log.Error("list devices", "err", err)
-		writeError(w, http.StatusInternalServerError, "device list unavailable")
+		writeError(w, http.StatusInternalServerError, msgDeviceListFailed)
 		return
 	}
 	views := make([]deviceView, 0, len(devices))
@@ -230,7 +230,7 @@ func (s *apiServer) handleGetDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.log.Error("read a device", "dev_eui", devEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device store unavailable")
+		writeError(w, http.StatusInternalServerError, msgStoreUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, newDeviceView(d))
@@ -250,7 +250,7 @@ func (s *apiServer) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 	existing, err := s.devices.DeviceByDevEUI(r.Context(), dev.DevEUI)
 	if err != nil && !errors.Is(err, engine.ErrNotFound) {
 		s.log.Error("look up a device before creating it", "dev_eui", dev.DevEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device store unavailable")
+		writeError(w, http.StatusInternalServerError, msgStoreUnavailable)
 		return
 	}
 	if existing != nil {
@@ -260,7 +260,7 @@ func (s *apiServer) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.devices.SaveDevice(r.Context(), dev); err != nil {
 		s.log.Error("save a new device", "dev_eui", dev.DevEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device could not be saved")
+		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
 		return
 	}
 	s.log.Info("device provisioned", "dev_eui", dev.DevEUI, "name", dev.Name,
@@ -298,7 +298,7 @@ func (s *apiServer) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.log.Error("look up a device before updating it", "dev_eui", pathEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device store unavailable")
+		writeError(w, http.StatusInternalServerError, msgStoreUnavailable)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (s *apiServer) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.devices.SaveDevice(r.Context(), dev); err != nil {
 		s.log.Error("update a device", "dev_eui", pathEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device could not be saved")
+		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
 		return
 	}
 	s.log.Info("device updated", "dev_eui", pathEUI, "name", dev.Name, "enabled", dev.Enabled)
@@ -333,7 +333,7 @@ func (s *apiServer) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.log.Error("delete a device", "dev_eui", devEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "device could not be deleted")
+		writeError(w, http.StatusInternalServerError, msgDeviceDeleteFail)
 		return
 	}
 	s.log.Info("device deleted", "dev_eui", devEUI)

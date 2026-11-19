@@ -74,8 +74,8 @@ func (e *Engine) handleJoinRequest(ctx context.Context, frame gateway.UplinkFram
 	// The JoinNonce (AppNonce) handed out by the server increases by one per
 	// join, so it is always new and always greater than the previous one —
 	// which is what lets the device reject a replayed join-accept.
-	if dev.NextJoinNonce >= 0xFFFFFF {
-		return e.dropEvent(ctx, frame, phy, "join_nonce_exhausted",
+	if dev.NextJoinNonce >= lorawan.MaxJoinNonce {
+		return e.dropEvent(ctx, frame, phy, ReasonJoinNonceExhausted,
 			"the 24-bit JoinNonce counter is exhausted; re-provision the device")
 	}
 	appNonce := dev.NextJoinNonce + 1

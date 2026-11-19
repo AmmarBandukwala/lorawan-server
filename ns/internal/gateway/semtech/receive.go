@@ -9,12 +9,18 @@ import (
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
+// maxDatagramBytes bounds a single received datagram. A Semtech packet is a
+// header plus JSON and never approaches this; the size is the maximum a UDP
+// datagram can carry, so the read buffer never has to be grown in response to
+// what a peer sends.
+const maxDatagramBytes = 65536
+
 // readLoop owns the socket until it is closed. Packets are dispatched to
 // goroutines so one slow engine call cannot stall every other gateway, with
 // s.sem bounding how many may be in flight.
 func (s *Server) readLoop(ctx context.Context) {
 	defer s.wg.Done()
-	buf := make([]byte, 65536)
+	buf := make([]byte, maxDatagramBytes)
 	for {
 		n, from, err := s.conn.ReadFromUDP(buf)
 		if err != nil {

@@ -81,7 +81,7 @@ func (r RadioRx) PHYBytes() ([]byte, error) {
 // FrequencyHz converts the MHz field to the Hz the rest of the engine uses.
 // Rounding matters: 868.1 must become 868100000, not 868099999.
 func (r RadioRx) FrequencyHz() uint32 {
-	return uint32(r.Freq*1e6 + 0.5)
+	return region.MHzToHertz(r.Freq)
 }
 
 // ArrivalTime reports the gateway's UTC reception time when it sends one.

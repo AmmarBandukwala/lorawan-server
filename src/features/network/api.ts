@@ -26,12 +26,19 @@ export const emptySnapshot: NetworkSnapshot = {
   failed: [],
 }
 
+/**
+ * Where the console's own API lives. Every route is derived from this, so the
+ * prefix exists in one place — nginx maps it, the API serves it, and a change
+ * here has to be matched in both of those.
+ */
+const API_PREFIX = '/api/v1'
+
 const endpoints: Record<SectionKey, string> = {
-  devices: '/api/v1/devices',
-  overview: '/api/v1/overview',
-  gateways: '/api/v1/gateways',
-  events: '/api/v1/events',
-  settings: '/api/v1/settings',
+  devices: `${API_PREFIX}/devices`,
+  overview: `${API_PREFIX}/overview`,
+  gateways: `${API_PREFIX}/gateways`,
+  events: `${API_PREFIX}/events`,
+  settings: `${API_PREFIX}/settings`,
 }
 
 /** Every section the dashboard reads, so callers can tell "all failed" from "some failed". */
@@ -115,18 +122,35 @@ export type NewDevice = {
 }
 
 /**
+ * What each failure status means to the operator, in the order they should be
+ * checked.
+ *
+ * The status code is the interesting part of the response, not the body: the
+ * API's own wording describes its internals, while this table names the action.
+ * A 502 and a 504 look identical in a generic error and call for different
+ * fixes — one is a network server that is not running, the other one that is
+ * running but wedged.
+ */
+const REGISTRATION_FAILURES: Record<number, string> = {
+  409: 'That DevEUI is already provisioned on this network.',
+  502: 'The network server could not be reached, so the device was not provisioned.',
+  503: 'This console is not connected to a network server, so it cannot provision a device.',
+  504: 'The network server did not answer in time. Check that it is running before retrying.',
+}
+
+const REGISTRATION_FAILURE_FALLBACK =
+  'The device was not accepted. Check the DevEUI, JoinEUI and AppKey against the device label.'
+
+/**
  * Registers a device, which means provisioning it on the network.
  *
  * This used to write an inventory row that nothing read, so a "registered"
  * device could never join and the dashboard kept listing it as absent. The
  * request now carries the join credentials and goes to the network server, which
  * is what makes the device able to join.
- *
- * Errors are phrased as the action the operator can take, because the response
- * body's own wording describes our internals.
  */
 export async function registerDevice(input: NewDevice): Promise<Device> {
-  const response = await fetch('/api/v1/devices', {
+  const response = await fetch(endpoints.devices, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -137,17 +161,14 @@ export async function registerDevice(input: NewDevice): Promise<Device> {
       group: input.group,
     }),
   })
-  if (response.status === 409) throw new Error('That DevEUI is already provisioned on this network.')
-  if (response.status === 503) throw new Error('This console is not connected to a network server, so it cannot provision a device.')
-  if (response.status === 504) throw new Error('The network server did not answer in time. Check that it is running before retrying.')
-  if (response.status === 502) throw new Error('The network server could not be reached, so the device was not provisioned.')
-  if (!response.ok) throw new Error('The device was not accepted. Check the DevEUI, JoinEUI and AppKey against the device label.')
+  if (!response.ok) {
+    throw new Error(REGISTRATION_FAILURES[response.status] ?? REGISTRATION_FAILURE_FALLBACK)
+  }
   return response.json() as Promise<Device>
 }
 
-
 export async function saveFacilitySettings(settings: FacilitySettings): Promise<FacilitySettings> {
-  const response = await fetch('/api/v1/settings', {
+  const response = await fetch(endpoints.settings, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(settings),

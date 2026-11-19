@@ -78,7 +78,7 @@ func ParseJoinAccept(wire []byte, appKey AES128Key) (*JoinAcceptPayload, [4]byte
 }
 
 func marshalJoinAcceptBody(pl JoinAcceptPayload) ([]byte, error) {
-	if pl.JoinNonce > 0xFFFFFF {
+	if pl.JoinNonce > MaxJoinNonce {
 		return nil, fmt.Errorf("JoinNonce %d exceeds 24 bits", pl.JoinNonce)
 	}
 	out := make([]byte, 0, 12+16)

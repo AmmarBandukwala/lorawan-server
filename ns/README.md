@@ -34,6 +34,11 @@ to settle it.
 | `internal/gateway/semtech` | Semtech UDP packet forwarder: `push_data` / `pull_data` / `pull_resp` / `tx_ack`, gateway registry, downlink timing | M3 ✅ |
 | `cmd/ns` | The network-server process: env config, UDP listener, status endpoint, graceful shutdown | M3 ✅ |
 | `cmd/nsbench` | Simulated gateway + class-A device that drives a running `ns` over real UDP | M3 ✅ |
+| `test/contract` | Our output against published vectors: RFC 4493, ChirpStack frames and keys, RP002 band tables | M1 ✅ |
+| `test/scenarios` | Device sessions driven through the engine's exported API: join, uplink, downlink, replay, ADR, MAC | M2 ✅ |
+| `test/transport` | Whole radio path over a real UDP socket, including downlink `tmst` timing | M3 ✅ |
+| `test/database` | PostgreSQL store against a real server (opt-in via `NS_TEST_DSN`) | M2 ✅ |
+| `test/testenv`, `test/testforwarder` | Shared harnesses: engine + simulated device; a Semtech packet forwarder | — |
 | `internal/region` (mask, user channels) | Per-device channel plan: ChMaskCntl semantics per band, dynamic channels layered over the band table | M4 ✅ |
 | `internal/engine` (adr, requests) | SNR-window ADR, outstanding MAC requests re-sent until answered, duty-cycle / TX-param / RX-timing / NewChannel loops | M4 ✅ |
 | `internal/integration` | Event fan-out to application webhooks | M5 ✅ |
@@ -249,6 +254,11 @@ make vet         # go vet ./...
 make demo        # go run ./cmd/nsdemo — narrated OTAA session, no radio
 ```
 
+Tests are split between `test/` (cross-package and specification tests, driven
+through exported API) and `*_test.go` beside the file they test (white-box tests
+of one package's internals). `test/README.md` is the map: where a new test goes,
+what each suite covers, and how to read a failure in it.
+
 The PostgreSQL store has an opt-in integration test; `go test ./...` skips it
 unless a DSN is supplied:
 
@@ -258,6 +268,29 @@ docker run -d --name ns-pgtest -e POSTGRES_PASSWORD=ns -e POSTGRES_DB=ns \
 NS_TEST_DSN='postgres://postgres:ns@host.docker.internal:5433/ns?sslmode=disable' \
   make test-pg
 ```
+
+## Where to look when something is wrong
+
+The paths below are the first place to read for each symptom, not an exhaustive
+map. Every one of them is a single function or table, and the reason strings in
+[`internal/engine/events.go`](internal/engine/events.go) are the vocabulary the
+other three columns refer to.
+
+| Symptom | Start here | Then |
+|---|---|---|
+| A frame is rejected and the event names a reason | `internal/engine/events.go` — read what the reason means | The reason's own site: join in `engine/join.go`, data in `engine/uplink.go` |
+| MIC fails on an uplink that looks correct | `lorawan/phy_security.go` `ValidateDataMIC` | Session keys: `lorawan/keys.go` `DeriveSessionKey`, then the device's join state |
+| Counter is refused as replay or gap | `lorawan/fcnt.go` `FullFCnt` | `engine/uplink.go`, where the accepted counter is advanced |
+| Join-accept never reaches the device | `engine/downlink.go` `joinWindows` | `gateway/semtech/send.go` `SendDownlink` — check the `tmst` it logged |
+| Uplinks seen, no downlinks received | `gateway/semtech/registry.go` — has the gateway sent `PULL_DATA`? | The `tmst` vs `imme` decision in `send.go`; then TX-ACK errors in the registry |
+| Downlink arrives at the wrong time | `gateway/semtech/token.go` | The `tmst`/`tmms`/`time` fallback in `receive.go` `handleRx` |
+| Wrong frequency or data rate | `region/frequency.go` (rounding), then the band table | `gateway/semtech/messages.go` `DataRateIndex` for what the forwarder reported |
+| Device stuck at a low data rate | `engine/adr.go` `adrDecide` — the `Reason` field explains the arithmetic | `engine/requests.go` `applyADR` for whether a request was ever sent |
+| A MAC change was accepted but not applied | `engine/mac.go` — the answer handling | `engine/requests.go`, where an outstanding request becomes session state |
+| Transmission refused as duty cycle or dwell | `engine/dutycycle.go` `airtimeBudget.reserve` | `region/toa.go` for the airtime it computed |
+| Webhook missing events | `internal/integration/dispatcher.go` `Stats` — dropped vs failed | `dispatcher.go` `deliver`, then `webhook.go` for the attempt policy |
+| API returns an unexpected status | `cmd/ns/api_responses.go` `writeEngineError` | The code's meaning: `api/internal/httpapi/errors.go` on the console side |
+| Dashboard shows stale or empty panels | `src/features/network/api.ts` `loadNetworkSnapshot` | `failed` in the snapshot names which section, and why |
 
 ## References
 

@@ -71,7 +71,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	if err := s.repository.Ping(r.Context()); err != nil {
-		writeError(w, http.StatusServiceUnavailable, "database_unavailable")
+		writeError(w, http.StatusServiceUnavailable, ErrDatabaseUnavailable)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

@@ -1,9 +1,12 @@
-package engine
+package scenarios_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/fieldnode/lorawan-server/ns/test/testenv"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/sim"
 )
@@ -15,27 +18,27 @@ import (
 // ever sends, each time with a fresh FCntDown, so the device would hand the same
 // payload to its application over and over.
 func TestUnconfirmedDownlinkIsTransmittedOnce(t *testing.T) {
-	env := newTestEnv(t, nil)
-	simDev, _ := env.join()
+	env := testenv.New(t, nil)
+	simDev, _ := env.Join()
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	if err := env.eng.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, false); err != nil {
+	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, false); err != nil {
 		t.Fatalf("EnqueueDownlink: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xaa}}, gateway.RxWindow1)
-	sent := env.gw.frames()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xaa}}, gateway.RxWindow1)
+	sent := env.GW.Frames()
 	if len(sent) == 0 {
 		t.Fatal("the queued downlink was not transmitted")
 	}
-	if env.session(devEUI).Pending != nil {
+	if env.Session(devEUI).Pending != nil {
 		t.Fatal("an unconfirmed frame must not stay queued after transmission")
 	}
 
 	// A second uplink must produce no downlink at all.
-	env.gw.reset()
-	env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xbb}}, gateway.RxWindow1)
-	if again := env.gw.frames(); len(again) != 0 {
+	env.GW.Reset()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xbb}}, gateway.RxWindow1)
+	if again := env.GW.Frames(); len(again) != 0 {
 		t.Errorf("the downlink was re-sent on the next uplink: %d frame(s)", len(again))
 	}
 }
@@ -44,16 +47,16 @@ func TestUnconfirmedDownlinkIsTransmittedOnce(t *testing.T) {
 // frame must be re-sent while the device has not answered, and dropped once it
 // has.
 func TestConfirmedDownlinkSurvivesUntilAcknowledged(t *testing.T) {
-	env := newTestEnv(t, nil)
-	simDev, _ := env.join()
+	env := testenv.New(t, nil)
+	simDev, _ := env.Join()
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	if err := env.eng.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, true); err != nil {
+	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, true); err != nil {
 		t.Fatalf("EnqueueDownlink: %v", err)
 	}
-	env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xaa}}, gateway.RxWindow1)
-	first := env.session(devEUI).Pending
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xaa}}, gateway.RxWindow1)
+	first := env.Session(devEUI).Pending
 	if first == nil {
 		t.Fatal("a confirmed frame must stay queued until the device acknowledges it")
 	}
@@ -62,10 +65,10 @@ func TestConfirmedDownlinkSurvivesUntilAcknowledged(t *testing.T) {
 	}
 
 	// The device answers with a confirmed uplink carrying FCtrl.ACK.
-	env.gw.reset()
-	env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xbb}, Confirmed: true, ACK: true},
+	env.GW.Reset()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xbb}, Confirmed: true, ACK: true},
 		gateway.RxWindow1)
-	if ses := env.session(devEUI); ses.Pending != nil {
+	if ses := env.Session(devEUI); ses.Pending != nil {
 		t.Error("the acknowledged frame must be dropped from the queue")
 	}
 }
@@ -73,29 +76,29 @@ func TestConfirmedDownlinkSurvivesUntilAcknowledged(t *testing.T) {
 // TestDownlinkRetriesAreCapped: a device that has left coverage must not spend
 // every window it ever opens re-transmitting a frame nobody will hear.
 func TestDownlinkRetriesAreCapped(t *testing.T) {
-	env := newTestEnv(t, nil)
-	simDev, _ := env.join()
+	env := testenv.New(t, nil)
+	simDev, _ := env.Join()
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	if err := env.eng.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, true); err != nil {
+	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, []byte{0x01}, true); err != nil {
 		t.Fatalf("EnqueueDownlink: %v", err)
 	}
-	for i := 0; i < maxDownlinkAttempts; i++ {
-		env.gw.reset()
-		env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{byte(i)}}, gateway.RxWindow1)
+	for i := 0; i < engine.MaxDownlinkAttempts; i++ {
+		env.GW.Reset()
+		env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{byte(i)}}, gateway.RxWindow1)
 	}
-	if ses := env.session(devEUI); ses.Pending != nil {
-		t.Errorf("the frame is still queued after %d attempts", maxDownlinkAttempts)
+	if ses := env.Session(devEUI); ses.Pending != nil {
+		t.Errorf("the frame is still queued after %d attempts", engine.MaxDownlinkAttempts)
 	}
-	if len(env.store.EventsWithReason("downlink_abandoned")) != 1 {
-		t.Errorf("giving up must be recorded; events: %+v", env.store.Events())
+	if len(env.Store.EventsWithReason("downlink_abandoned")) != 1 {
+		t.Errorf("giving up must be recorded; events: %+v", env.Store.Events())
 	}
 
 	// And after giving up, nothing more is transmitted for it.
-	env.gw.reset()
-	env.uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xff}}, gateway.RxWindow1)
-	if frames := env.gw.frames(); len(frames) != 0 {
+	env.GW.Reset()
+	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xff}}, gateway.RxWindow1)
+	if frames := env.GW.Frames(); len(frames) != 0 {
 		t.Errorf("%d frame(s) sent after the network gave up", len(frames))
 	}
 }

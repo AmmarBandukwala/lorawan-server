@@ -42,7 +42,7 @@ func (b SubBand) Budget(window time.Duration) time.Duration {
 // String renders the range and its limit for logs and the status endpoint.
 func (b SubBand) String() string {
 	return fmt.Sprintf("%.3f-%.3f MHz @ %.4g%% duty cycle",
-		float64(b.MinHz)/1e6, float64(b.MaxHz)/1e6, b.DutyCycle*100)
+		HertzToMHz(b.MinHz), HertzToMHz(b.MaxHz), b.DutyCycle*100)
 }
 
 // subBandFor finds the sub-band governing a frequency. ok is false when the

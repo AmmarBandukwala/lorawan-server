@@ -1,15 +1,17 @@
-package region
+package contract_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
-func mustRegion(t *testing.T, name string) Region {
+func mustRegion(t *testing.T, name string) region.Region {
 	t.Helper()
-	r, err := New(name)
+	r, err := region.New(name)
 	if err != nil {
-		t.Fatalf("New(%q): %v", name, err)
+		t.Fatalf("region.New(%q): %v", name, err)
 	}
 	return r
 }
@@ -137,7 +139,7 @@ func TestAS923(t *testing.T) {
 		}
 	}
 
-	if _, err := New("KR920"); err == nil {
+	if _, err := region.New("KR920"); err == nil {
 		t.Error("KR920 must not be supported yet")
 	}
 }

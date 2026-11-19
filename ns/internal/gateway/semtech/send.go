@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
 
 // SendDownlink transmits a downlink by pushing a PULL_RESP to the address the
@@ -56,7 +57,7 @@ func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error 
 	}
 
 	tx := DownlinkCommand{
-		FrequencyMHZ:       float64(f.FrequencyHz) / 1e6,
+		FrequencyMHZ:       region.HertzToMHz(f.FrequencyHz),
 		PowerdBm:           f.TxPowerdBm,
 		Modulation:         modu,
 		DataRate:           datr,

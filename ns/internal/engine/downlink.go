@@ -109,11 +109,15 @@ func (e *Engine) joinWindows(reg region.Region, frame gateway.UplinkFrame) []txP
 // retransmitted with the *same* counter: the device reconstructs its 32-bit
 // downlink counter from the frame itself, so a fresh counter would make the
 // retransmission unrecoverable.
-// maxDownlinkAttempts caps how often one queued frame is transmitted before the
+// MaxDownlinkAttempts caps how often one queued frame is transmitted before the
 // network gives up. It applies to confirmed downlinks awaiting an acknowledgement
 // and to MAC-only requests awaiting an answer; an unconfirmed application frame
 // is a single attempt regardless.
-const maxDownlinkAttempts = 8
+//
+// Exported because the cap is observable behaviour a caller can plan around: it
+// sets how long a device can be unreachable before its queued frame is dropped,
+// and a test needs it to drive a session past the limit.
+const MaxDownlinkAttempts = 8
 
 func allocateDownlinkFCnt(ses *Session, pending *PendingDownlink) uint32 {
 	if pending != nil && pending.FCntDown != 0 && pending.FCntDown == ses.FCntDown {

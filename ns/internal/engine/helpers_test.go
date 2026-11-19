@@ -1,3 +1,16 @@
+// In-package test helpers for the engine's white-box tests.
+//
+// Why this exists next to ns/test/testenv, which does the same job: a Go
+// package's own tests cannot import anything that imports that package, so a
+// shared out-of-package harness is unreachable from here. The tests that remain
+// in this package need it — the duty-cycle tests reach engine.budget to
+// pre-fill a sub-band's airtime ledger, which there is deliberately no exported
+// way to do because fabricating radio history in a running server would be a way
+// to take a gateway down.
+//
+// Everything else moved to ns/test/scenarios and drives the exported API. When
+// adding a test here, ask first whether it can be written from outside; only
+// reach for this file when the behaviour is genuinely internal.
 package engine
 
 import (
@@ -234,14 +247,4 @@ func (env *testEnv) uplinkWire(wire []byte) error {
 	env.t.Helper()
 	return env.eng.HandleUplink(context.Background(),
 		uplinkFrame(wire, gateway.RxWindow1, eu868Ch0Hz, eu868DR5))
-}
-
-func (env *testEnv) session(devEUI lorawan.EUI64) *Session {
-	env.t.Helper()
-
-	ses, err := env.store.SessionByDevEUI(context.Background(), devEUI)
-	if err != nil {
-		env.t.Fatalf("SessionByDevEUI: %v", err)
-	}
-	return ses
 }

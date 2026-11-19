@@ -5,6 +5,18 @@ import (
 	"testing"
 )
 
+// mustKey parses an AES key and stops the test if the literal is malformed. A
+// test that carried on with a zero key would compare the implementation against
+// itself and pass.
+func mustKey(t *testing.T, s string) AES128Key {
+	t.Helper()
+	k, err := ParseAES128Key(s)
+	if err != nil {
+		t.Fatalf("ParseAES128Key(%q): %v", s, err)
+	}
+	return k
+}
+
 // End-to-end M1 check: simulated device joins, derives session keys, and
 // sends an uplink the NS can validate and decrypt.
 func TestOTAARoundTrip(t *testing.T) {

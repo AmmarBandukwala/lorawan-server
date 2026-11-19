@@ -155,7 +155,7 @@ func (e *Engine) handleDataUplink(ctx context.Context, frame gateway.UplinkFrame
 	if counterReset {
 		e.recordEvent(ctx, Event{
 			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr, FCntUp: fcntUp,
-			Reason: "f_cnt_reset",
+			Reason: ReasonFCntReset,
 			Detail: "device counter reset without re-join; re-basing the session counter",
 		})
 	}
@@ -272,7 +272,7 @@ func (e *Engine) respondToUplink(ctx context.Context, frame gateway.UplinkFrame,
 	if dropped != nil {
 		e.recordEvent(ctx, Event{
 			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr, FCntUp: fcntUp,
-			Reason: "mac_commands_truncated",
+			Reason: ReasonMACCommandsTruncated,
 			Detail: fmt.Sprintf("FOpts full, deferred %d command(s): %s", dropped.count, dropped.names()),
 		})
 	}
@@ -344,7 +344,7 @@ func (e *Engine) respondToUplink(ctx context.Context, frame gateway.UplinkFrame,
 // A confirmed downlink stays until the device's confirmed uplink acknowledges it
 // (see the FCtrl.ACK handling in the uplink path), and a MAC-only request stays
 // because those are meant to repeat until answered. Both are bounded by
-// maxDownlinkAttempts: a device that has moved out of coverage must not spend
+// MaxDownlinkAttempts: a device that has moved out of coverage must not spend
 // every window it ever opens re-transmitting a frame nobody will hear.
 func (e *Engine) retirePending(ctx context.Context, ses *Session) {
 	p := ses.Pending
@@ -355,13 +355,13 @@ func (e *Engine) retirePending(ctx context.Context, ses *Session) {
 		ses.Pending = nil
 		return
 	}
-	if p.Attempts < maxDownlinkAttempts {
+	if p.Attempts < MaxDownlinkAttempts {
 		return
 	}
 	ses.Pending = nil
 	e.recordEvent(ctx, Event{
 		Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-		Reason: "downlink_abandoned",
+		Reason: ReasonDownlinkAbandoned,
 		Detail: fmt.Sprintf("giving up after %d attempts to deliver FCntDown %d",
 			p.Attempts, p.FCntDown),
 	})

@@ -1,29 +1,16 @@
-package engine
+package scenarios_test
 
 import (
 	"context"
 	"testing"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/engine"
+	"github.com/fieldnode/lorawan-server/ns/test/testenv"
+
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/sim"
 )
-
-// uplinkSNR feeds a device frame with a chosen signal-to-noise ratio, which is
-// the only measurement ADR responds to.
-func (env *testEnv) uplinkSNR(simDev *sim.Device, o sim.UplinkOptions, snr float64) {
-	env.t.Helper()
-
-	wire, err := simDev.NextUplink(o)
-	if err != nil {
-		env.t.Fatalf("NextUplink: %v", err)
-	}
-	f := uplinkFrame(wire, gateway.RxWindow1, eu868Ch0Hz, eu868DR5)
-	f.SNR = snr
-	if err := env.eng.HandleUplink(context.Background(), f); err != nil {
-		env.t.Fatalf("HandleUplink: %v", err)
-	}
-}
 
 // linkADRReqFrom lets the simulated device decode the downlink the engine
 // scheduled and reports the LinkADRReq inside it, if any.
@@ -63,27 +50,27 @@ func linkADRReqFrom(t *testing.T, simDev *sim.Device, frames []gateway.DownlinkF
 // LinkADRReq the device has already satisfied burns a downlink slot on every
 // uplink forever, and on a busy gateway that is a measurable loss of capacity.
 func TestADRConvergesAndThenStops(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
-	eu868 := mustRegionTB(t, "EU868")
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
+	eu868 := testenv.MustRegion(t, "EU868")
 	maxTX := len(eu868.TXPowerOffsets()) - 1
 
-	simDev, _ := env.join()
+	simDev, _ := env.Join()
 
 	// Park the device at the bottom of the band so there is somewhere to climb.
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	ses.DataRate, ses.TxPower, ses.NbTrans = 0, 0, 1
-	if err := env.store.SaveSession(ctx, ses); err != nil {
+	if err := env.Store.SaveSession(ctx, ses); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
 	asked := 0
 	for round := 0; round < 12; round++ {
-		env.gw.reset()
-		env.uplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 12.0)
+		env.GW.Reset()
+		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 12.0)
 
-		req, ok := linkADRReqFrom(t, simDev, env.gw.frames())
+		req, ok := linkADRReqFrom(t, simDev, env.GW.Frames())
 		if !ok {
 			break
 		}
@@ -93,16 +80,16 @@ func TestADRConvergesAndThenStops(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LinkADRAns: %v", err)
 		}
-		env.uplinkWire(wire)
+		env.UplinkWire(wire)
 
-		after := env.session(devEUI)
+		after := env.Session(devEUI)
 		if int(req.DataRate) != after.DataRate || int(req.TxPower) != after.TxPower {
 			t.Fatalf("round %d: the device accepted DR%d TX%d but the session holds DR%d TX%d",
 				round, req.DataRate, req.TxPower, after.DataRate, after.TxPower)
 		}
 	}
 
-	final := env.session(devEUI)
+	final := env.Session(devEUI)
 	if final.DataRate != 5 {
 		t.Errorf("DataRate = %d, want the EU868 ceiling 5", final.DataRate)
 	}
@@ -123,9 +110,9 @@ func TestADRConvergesAndThenStops(t *testing.T) {
 	// Each is decoded as it arrives, so the device's downlink counter stays in
 	// step with the engine's and a later frame can still be checked.
 	for i := 0; i < 5; i++ {
-		env.gw.reset()
-		env.uplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 12.0)
-		if _, ok := linkADRReqFrom(t, simDev, env.gw.frames()); ok {
+		env.GW.Reset()
+		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 12.0)
+		if _, ok := linkADRReqFrom(t, simDev, env.GW.Frames()); ok {
 			t.Fatalf("uplink %d: a device already at both ceilings was asked again", i)
 		}
 	}
@@ -134,19 +121,19 @@ func TestADRConvergesAndThenStops(t *testing.T) {
 // TestADRRespectsTheDeviceADRBit covers the device's side of the bargain: a
 // device that clears FCtrl.ADR has decided to keep its own data rate.
 func TestADRRespectsTheDeviceADRBit(t *testing.T) {
-	env := newTestEnv(t, nil)
-	devEUI := mustEUI64(t, testDevEUI)
+	env := testenv.New(t, nil)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
+	simDev, _ := env.Join()
 	// The session comes out of the join carrying the data rate the join-request
 	// arrived on; what matters here is that ADR leaves it where it is.
-	before := env.session(devEUI).DataRate
+	before := env.Session(devEUI).DataRate
 
-	for i := 0; i < adrHistorySize; i++ {
-		env.uplinkSNR(simDev, sim.UplinkOptions{NoFPort: true /* ADR clear */}, 15.0)
+	for i := 0; i < engine.ADRHistorySize; i++ {
+		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true /* ADR clear */}, 15.0)
 	}
 
-	ses := env.session(devEUI)
+	ses := env.Session(devEUI)
 	if ses.DataRate != before {
 		t.Errorf("DataRate = %d, want it left at %d", ses.DataRate, before)
 	}
@@ -162,26 +149,26 @@ func TestADRRespectsTheDeviceADRBit(t *testing.T) {
 
 // TestADRDisabledByDeviceProfile is the operator's override.
 func TestADRDisabledByDeviceProfile(t *testing.T) {
-	env := newTestEnv(t, nil)
+	env := testenv.New(t, nil)
 	ctx := context.Background()
-	devEUI := mustEUI64(t, testDevEUI)
+	devEUI := testenv.MustEUI64(t, testenv.DevEUI)
 
-	simDev, _ := env.join()
+	simDev, _ := env.Join()
 
-	dev, err := env.store.DeviceByDevEUI(ctx, devEUI)
+	dev, err := env.Store.DeviceByDevEUI(ctx, devEUI)
 	if err != nil {
 		t.Fatalf("DeviceByDevEUI: %v", err)
 	}
 	dev.DisableADR = true
-	if err := env.store.SaveDevice(ctx, dev); err != nil {
+	if err := env.Store.SaveDevice(ctx, dev); err != nil {
 		t.Fatalf("SaveDevice: %v", err)
 	}
 
-	before := env.session(devEUI).DataRate
-	for i := 0; i < adrHistorySize; i++ {
-		env.uplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 15.0)
+	before := env.Session(devEUI).DataRate
+	for i := 0; i < engine.ADRHistorySize; i++ {
+		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 15.0)
 	}
-	if ses := env.session(devEUI); ses.PendingADR != nil || ses.DataRate != before {
+	if ses := env.Session(devEUI); ses.PendingADR != nil || ses.DataRate != before {
 		t.Errorf("DisableADR was ignored: DR%d (was %d) pending %+v",
 			ses.DataRate, before, ses.PendingADR)
 	}

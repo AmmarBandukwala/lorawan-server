@@ -26,6 +26,21 @@ type UserChannels struct {
 // reserves 0..71 for the fixed plans).
 const MaxUserChannelIndex = 255
 
+// MinChannelFrequencyHz and MaxChannelFrequencyHz bracket every frequency any
+// LoRaWAN regional parameter document assigns. They are not a band check — the
+// band check is the channel table — but a sanity floor and ceiling, so a device
+// that sends a NewChannelReq for 0 Hz or for 4 GHz is refused with an
+// explanation instead of being handed a channel nothing can transmit on.
+const (
+	MinChannelFrequencyHz = 100_000       // 100 kHz, below every band in RP002
+	MaxChannelFrequencyHz = 1_000_000_000 // 1 GHz, above every band in RP002
+)
+
+// ChannelFrequencyStepHz is the resolution the on-air Freq field can express:
+// NewChannelReq carries frequency in 100 Hz units, so anything finer would be
+// silently rounded and the device would end up listening somewhere else.
+const ChannelFrequencyStepHz = 100
+
 // WithUserChannels returns a view of reg in which the given channels replace or
 // extend the band's uplink plan. Channels whose index is below the band's own
 // count overwrite a fixed channel; higher indices are appended.

@@ -36,24 +36,24 @@ var supportedRegions = map[string]struct{}{"EU868": {}, "US915": {}, "AS923": {}
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	settings, err := s.repository.GetSettings(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_query_failed")
+		writeError(w, http.StatusInternalServerError, ErrSettingsQueryFailed)
 		return
 	}
 	writeJSON(w, http.StatusOK, toSettingsResponse(settings))
 }
 
 func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 	var request settingsRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		writeError(w, http.StatusBadRequest, ErrInvalidJSON)
 		return
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		writeError(w, http.StatusBadRequest, ErrInvalidJSON)
 		return
 	}
 
@@ -69,20 +69,24 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, err := s.repository.UpdateSettings(r.Context(), settings)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "settings_update_failed")
+		writeError(w, http.StatusInternalServerError, ErrSettingsUpdateFail)
 		return
 	}
 	writeJSON(w, http.StatusOK, toSettingsResponse(updated))
 }
 
 func validateFacilitySettings(settings domain.FacilitySettings) string {
-	if utf8.RuneCountInString(settings.FacilityName) == 0 || utf8.RuneCountInString(settings.FacilityName) > 120 ||
-		utf8.RuneCountInString(settings.OperatorName) == 0 || utf8.RuneCountInString(settings.OperatorName) > 120 ||
-		utf8.RuneCountInString(settings.OperatorRole) == 0 || utf8.RuneCountInString(settings.OperatorRole) > 80 {
-		return "invalid_settings"
+	if n := utf8.RuneCountInString(settings.FacilityName); n == 0 || n > MaxNameLen {
+		return ErrInvalidSettings
+	}
+	if n := utf8.RuneCountInString(settings.OperatorName); n == 0 || n > MaxOperatorNameLen {
+		return ErrInvalidSettings
+	}
+	if n := utf8.RuneCountInString(settings.OperatorRole); n == 0 || n > MaxOperatorRoleLen {
+		return ErrInvalidSettings
 	}
 	if _, ok := supportedRegions[settings.Region]; !ok {
-		return "unsupported_region"
+		return ErrUnsupportedRegion
 	}
 	return ""
 }

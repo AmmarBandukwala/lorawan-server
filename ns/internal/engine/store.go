@@ -235,7 +235,7 @@ type Session struct {
 
 	// --- ADR, channel plan and outstanding MAC requests ---------------------
 
-	// UplinkHistory holds the last adrHistorySize accepted uplinks with the SNR
+	// UplinkHistory holds the last ADRHistorySize accepted uplinks with the SNR
 	// the network measured, oldest first. ADR decides on this window.
 	UplinkHistory []UplinkHistoryItem
 
@@ -354,38 +354,7 @@ type DownlinkRecord struct {
 	ACK           bool
 }
 
-// Event kinds recorded by the engine.
-const (
-	EventJoinRequest = "join_request"
-	EventJoinAccept  = "join_accept"
-	EventJoinReject  = "join_reject"
-	EventUplink      = "uplink"
-	EventDownlink    = "downlink"
-	EventUplinkDrop  = "uplink_drop"
-	EventMAC         = "mac"
-	EventError       = "error"
-)
-
-// Reasons used with EventJoinReject and EventUplinkDrop.
-const (
-	ReasonUnknownDevice      = "unknown_device"
-	ReasonDeviceDisabled     = "device_disabled"
-	ReasonNotOTAA            = "not_otaa_device"
-	ReasonJoinMICFailed      = "join_mic_failed"
-	ReasonDevNonceReplay     = "dev_nonce_replay"
-	ReasonUnknownDevAddr     = "unknown_dev_addr"
-	ReasonUplinkMICFailed    = "uplink_mic_failed"
-	ReasonFCntReplay         = "f_cnt_replay"
-	ReasonFCntGapTooLarge    = "f_cnt_gap_too_large"
-	ReasonDuplicateFrame     = "duplicate_frame"
-	ReasonNoRXWindow         = "no_rx_window_available"
-	ReasonDownlinkSendFailed = "downlink_send_failed"
-	ReasonDownlinkTooLarge   = "downlink_too_large_for_window"
-	// ReasonDutyCycleDenied means the band's duty cycle or dwell time left no
-	// room for the transmission. It is a regulatory refusal, not a fault, and
-	// the detail carries which limit was hit and when budget frees up again.
-	ReasonDutyCycleDenied = "duty_cycle_denied"
-)
+// Event kinds and reasons are in events.go, next to their documentation.
 
 // Event is a trace entry surfaced in the Fieldnode dashboard.
 type Event struct {

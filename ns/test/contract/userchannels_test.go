@@ -1,21 +1,25 @@
-package region
+package contract_test
 
-import "testing"
+import (
+	"testing"
 
-func ch(freq uint32, rates ...int) Channel {
-	return Channel{FrequencyHz: freq, DataRates: rates, Enabled: true}
+	"github.com/fieldnode/lorawan-server/ns/internal/region"
+)
+
+func ch(freq uint32, rates ...int) region.Channel {
+	return region.Channel{FrequencyHz: freq, DataRates: rates, Enabled: true}
 }
 
 // TestWithUserChannelsExtendsThePlan covers the ordinary case: a channel beyond
 // the band's fixed plan is appended, enabled, and marked user-defined.
 func TestWithUserChannelsExtendsThePlan(t *testing.T) {
-	eu868, err := New("EU868")
+	eu868, err := region.New("EU868")
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	fixed := eu868.ChannelCount()
 
-	reg, err := WithUserChannels(eu868, map[int]Channel{
+	reg, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		fixed: {FrequencyHz: 869400000, DataRates: []int{0, 1, 2}},
 	})
 	if err != nil {
@@ -46,7 +50,7 @@ func TestWithUserChannelsExtendsThePlan(t *testing.T) {
 	if got := reg.MaxDataRateForMask(mask); got != 5 {
 		t.Errorf("MaxDataRateForMask = %d, want 5 (the default channels still allow DR5)", got)
 	}
-	only := make(ChannelMask, len(mask))
+	only := make(region.ChannelMask, len(mask))
 	only[fixed] = true
 	if got := reg.MaxDataRateForMask(only); got != 2 {
 		t.Errorf("MaxDataRateForMask over the user channel alone = %d, want 2", got)
@@ -59,8 +63,8 @@ func TestWithUserChannelsExtendsThePlan(t *testing.T) {
 // TestWithUserChannelsOverwritesAFixedChannel is legal and rare: bringing a
 // device that learned a different plan back in line.
 func TestWithUserChannelsOverwritesAFixedChannel(t *testing.T) {
-	eu868, _ := New("EU868")
-	reg, err := WithUserChannels(eu868, map[int]Channel{
+	eu868, _ := region.New("EU868")
+	reg, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		0: {FrequencyHz: 867700000, DataRates: []int{0, 1, 2, 3, 4, 5}},
 	})
 	if err != nil {
@@ -78,19 +82,19 @@ func TestWithUserChannelsOverwritesAFixedChannel(t *testing.T) {
 // TestWithUserChannelsRejectsAGap: a missing index would make the mask length
 // ambiguous, and a device cannot enable a channel it was never told about.
 func TestWithUserChannelsRejectsAGap(t *testing.T) {
-	eu868, _ := New("EU868")
+	eu868, _ := region.New("EU868")
 	fixed := eu868.ChannelCount()
-	if _, err := WithUserChannels(eu868, map[int]Channel{
+	if _, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		fixed + 3: {FrequencyHz: 869400000, DataRates: []int{0}},
 	}); err == nil {
 		t.Error("a gap in the user channel indices must be refused")
 	}
-	if _, err := WithUserChannels(eu868, map[int]Channel{
+	if _, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		fixed: {DataRates: []int{0}},
 	}); err == nil {
 		t.Error("a user channel with no frequency must be refused")
 	}
-	if _, err := WithUserChannels(eu868, map[int]Channel{
+	if _, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		-1: {FrequencyHz: 869400000},
 	}); err == nil {
 		t.Error("a negative channel index must be refused")
@@ -102,9 +106,9 @@ func TestWithUserChannelsRejectsAGap(t *testing.T) {
 // fixed plan. Applying it must not switch off channels it never mentioned —
 // otherwise every ADR command would wipe a device's user plan.
 func TestUserChannelsMaskKeepsUserChannelsEnabled(t *testing.T) {
-	eu868, _ := New("EU868")
+	eu868, _ := region.New("EU868")
 	fixed := eu868.ChannelCount()
-	reg, err := WithUserChannels(eu868, map[int]Channel{
+	reg, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		fixed: {FrequencyHz: 869400000, DataRates: []int{0, 1, 2}},
 	})
 	if err != nil {
@@ -131,8 +135,8 @@ func TestUserChannelsMaskKeepsUserChannelsEnabled(t *testing.T) {
 // TestUserChannelsDelegatesEverythingElse guards the embedding: the rates, RX1
 // mapping, power table and payload limits still come from the band.
 func TestUserChannelsDelegatesEverythingElse(t *testing.T) {
-	eu868, _ := New("EU868")
-	reg, err := WithUserChannels(eu868, map[int]Channel{
+	eu868, _ := region.New("EU868")
+	reg, err := region.WithUserChannels(eu868, map[int]region.Channel{
 		eu868.ChannelCount(): {FrequencyHz: 869400000, DataRates: []int{0}},
 	})
 	if err != nil {
@@ -150,8 +154,8 @@ func TestUserChannelsDelegatesEverythingElse(t *testing.T) {
 		t.Errorf("RX1DataRate = %d, want the band's %d", got, want)
 	}
 	// No user channels means the band itself, unchanged.
-	same, err := WithUserChannels(eu868, nil)
+	same, err := region.WithUserChannels(eu868, nil)
 	if err != nil || same != eu868 {
-		t.Errorf("WithUserChannels with nothing to add should return the band: %v/%v", same, err)
+		t.Errorf("region.WithUserChannels with nothing to add should return the band: %v/%v", same, err)
 	}
 }

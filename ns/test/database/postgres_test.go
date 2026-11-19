@@ -1,4 +1,4 @@
-package pgstore
+package database_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
+	"github.com/fieldnode/lorawan-server/ns/internal/storage/pgstore"
 )
 
 // dsnEnv enables this test against a real PostgreSQL. Keeping it opt-in means
@@ -47,7 +48,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	store, err := Open(ctx, dsn)
+	store, err := pgstore.Open(ctx, dsn)
 	if err != nil {
 		t.Fatalf("Open (connect + migrate): %v", err)
 	}
@@ -132,7 +133,7 @@ func TestTrafficRecords(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	store, err := Open(ctx, dsn)
+	store, err := pgstore.Open(ctx, dsn)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestTrafficRecords(t *testing.T) {
 	var retries int
 	if err := store.Pool().QueryRow(ctx,
 		`SELECT retransmissions FROM ns_uplinks WHERE dev_eui = $1 AND f_cnt_up = 5`,
-		euiText(devEUI)).Scan(&retries); err != nil {
+		devEUI.String()).Scan(&retries); err != nil {
 		t.Fatalf("read back uplink: %v", err)
 	}
 	if retries != 1 {
@@ -195,7 +196,7 @@ func TestTrafficRecords(t *testing.T) {
 	var payload []byte
 	if err := store.Pool().QueryRow(ctx,
 		`SELECT f_port, frm_payload FROM ns_uplinks WHERE dev_eui = $1 AND f_cnt_up = 6`,
-		euiText(devEUI)).Scan(&fport, &payload); err != nil {
+		devEUI.String()).Scan(&fport, &payload); err != nil {
 		t.Fatalf("read back MAC-only uplink: %v", err)
 	}
 	if fport != -1 || payload != nil {
@@ -253,7 +254,7 @@ func TestMACStateRoundTrip(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	store, err := Open(ctx, dsn)
+	store, err := pgstore.Open(ctx, dsn)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -369,8 +370,8 @@ func TestMACStateRoundTrip(t *testing.T) {
 		t.Fatalf("SaveSession (plain): %v", err)
 	}
 	var raw []byte
-	if err := store.pool.QueryRow(ctx,
-		`SELECT mac_state FROM ns_sessions WHERE dev_eui = $1`, euiText(plain.DevEUI)).Scan(&raw); err != nil {
+	if err := store.Pool().QueryRow(ctx,
+		`SELECT mac_state FROM ns_sessions WHERE dev_eui = $1`, plain.DevEUI.String()).Scan(&raw); err != nil {
 		t.Fatalf("query mac_state: %v", err)
 	}
 	if len(raw) != 0 {
@@ -400,7 +401,7 @@ func TestDeviceCapabilityRoundTrip(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	store, err := Open(ctx, dsn)
+	store, err := pgstore.Open(ctx, dsn)
 	if err != nil {
 		t.Fatalf("Open (connect + migrate): %v", err)
 	}

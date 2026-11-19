@@ -41,7 +41,7 @@ type eventResponse struct {
 func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 	result, err := s.repository.GetOverview(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "overview_query_failed")
+		writeError(w, http.StatusInternalServerError, ErrOverviewQueryFailed)
 		return
 	}
 	response := overviewResponse{
@@ -61,7 +61,7 @@ func (s *Server) getOverview(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listGateways(w http.ResponseWriter, r *http.Request) {
 	items, err := s.repository.ListGateways(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "gateway_query_failed")
+		writeError(w, http.StatusInternalServerError, ErrGatewayQueryFailed)
 		return
 	}
 	now := time.Now()
@@ -83,7 +83,7 @@ func (s *Server) listGateways(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	items, err := s.repository.ListEvents(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "event_query_failed")
+		writeError(w, http.StatusInternalServerError, ErrEventQueryFailed)
 		return
 	}
 	now := time.Now()

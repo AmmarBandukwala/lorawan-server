@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -46,16 +47,23 @@ type deviceResponse struct {
 	RSSI     int16  `json:"rssi"`
 }
 
+// hexPattern builds the matcher for an identifier of a given hex width, so the
+// width is stated once — in the limit constants — rather than being repeated as a
+// literal inside a regular expression where nothing would notice a mismatch.
+func hexPattern(digits int) *regexp.Regexp {
+	return regexp.MustCompile(fmt.Sprintf(`^[0-9A-F]{%d}$`, digits))
+}
+
 var (
-	devEUIPattern = regexp.MustCompile(`^[0-9A-F]{16}$`)
-	appKeyPattern = regexp.MustCompile(`^[0-9A-F]{32}$`)
+	devEUIPattern = hexPattern(EUIHexDigits)
+	appKeyPattern = hexPattern(AppKeyHexDigits)
 )
 
 func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	devices, err := s.repository.ListDevices(r.Context())
 	if err != nil {
 		slog.Error("list devices", "err", err)
-		writeError(w, http.StatusInternalServerError, "device_query_failed")
+		writeError(w, http.StatusInternalServerError, ErrDeviceQueryFailed)
 		return
 	}
 
@@ -114,17 +122,17 @@ func (p *NSProvisioner) CreateDevice(ctx context.Context, d Provisioning) (Provi
 func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	// A provisioning body is a handful of identifiers; anything larger is not a
 	// device registration.
-	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 	var input createDeviceRequest
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		writeError(w, http.StatusBadRequest, ErrInvalidJSON)
 		return
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		writeError(w, http.StatusBadRequest, "invalid_json")
+		writeError(w, http.StatusBadRequest, ErrInvalidJSON)
 		return
 	}
 
@@ -132,19 +140,19 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	// Counted in runes, not bytes: a facility name with non-Latin characters is
 	// legitimate, and a byte count would reject it at a length that looks
 	// arbitrary to whoever typed it.
-	if nameLen := utf8.RuneCountInString(name); nameLen == 0 || nameLen > 120 {
-		writeError(w, http.StatusBadRequest, "name_must_be_1_to_120_characters")
+	if nameLen := utf8.RuneCountInString(name); nameLen == 0 || nameLen > MaxNameLen {
+		writeError(w, http.StatusBadRequest, ErrNameRequired)
 		return
 	}
 
 	devEUI := normalizeHex(input.DevEUI)
 	if !devEUIPattern.MatchString(devEUI) {
-		writeError(w, http.StatusBadRequest, "deveui_must_be_16_hex_characters")
+		writeError(w, http.StatusBadRequest, ErrDevEUIHex)
 		return
 	}
 	appKey := normalizeHex(input.AppKey)
 	if !appKeyPattern.MatchString(appKey) {
-		writeError(w, http.StatusBadRequest, "appkey_must_be_32_hex_characters")
+		writeError(w, http.StatusBadRequest, ErrAppKeyHex)
 		return
 	}
 	// JoinEUI is optional: an operator reading a label that prints only a DevEUI
@@ -153,7 +161,7 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	// device can join regardless of what it puts in its join-request.
 	joinEUI := normalizeHex(input.JoinEUI)
 	if joinEUI != "" && !devEUIPattern.MatchString(joinEUI) {
-		writeError(w, http.StatusBadRequest, "joineui_must_be_16_hex_characters")
+		writeError(w, http.StatusBadRequest, ErrJoinEUIHex)
 		return
 	}
 
@@ -161,8 +169,8 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 	if group == "" {
 		group = "Unassigned"
 	}
-	if utf8.RuneCountInString(group) > 60 {
-		writeError(w, http.StatusBadRequest, "group_must_be_at_most_60_characters")
+	if utf8.RuneCountInString(group) > MaxGroupLen {
+		writeError(w, http.StatusBadRequest, ErrGroupTooLong)
 		return
 	}
 
@@ -170,7 +178,7 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		// Configured, not requested: this service cannot provision without a
 		// network server to talk to, and saying so beats a 500 or a row that
 		// does nothing.
-		writeError(w, http.StatusServiceUnavailable, "provisioning_not_configured")
+		writeError(w, http.StatusServiceUnavailable, ErrProvisioningNotConfigured)
 		return
 	}
 
@@ -188,13 +196,13 @@ func (s *Server) createDevice(w http.ResponseWriter, r *http.Request) {
 		var conflict *nsclient.ConflictError
 		switch {
 		case errors.As(err, &conflict):
-			writeError(w, http.StatusConflict, "device_already_registered")
+			writeError(w, http.StatusConflict, ErrDeviceAlreadyRegistered)
 		case errors.Is(err, context.DeadlineExceeded):
 			slog.Error("provision device timed out", "err", err)
-			writeError(w, http.StatusGatewayTimeout, "network_server_timed_out")
+			writeError(w, http.StatusGatewayTimeout, ErrNetworkServerTimeout)
 		default:
 			slog.Error("provision device", "err", err)
-			writeError(w, http.StatusBadGateway, "network_server_unreachable")
+			writeError(w, http.StatusBadGateway, ErrNetworkServerUnreachable)
 		}
 		return
 	}

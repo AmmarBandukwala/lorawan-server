@@ -21,6 +21,16 @@ import (
 	"time"
 )
 
+const (
+	// nsDeviceRoute is the network server's device provisioning route prefix.
+	nsDeviceRoute = "/api/v1/devices"
+
+	// requestTimeout bounds one provisioning call. The network server may be
+	// starting alongside this process, so failing fast and letting the operator
+	// retry beats waiting on a container that is not answering yet.
+	requestTimeout = 10 * time.Second
+)
+
 // Device is what this client sends to create or replace a device. Credentials
 // are write-only: the network server never returns them, and neither does this
 // client keep them.
@@ -104,19 +114,33 @@ func New(baseURL, token string) (*Client, error) {
 		token:   token,
 		// The network server may be starting alongside this process, so a short
 		// timeout beats waiting for a container that is not answering.
-		http: &http.Client{Timeout: 10 * time.Second},
+		http: &http.Client{Timeout: requestTimeout},
 	}, nil
 }
 
 // CreateDevice provisions a device.
 func (c *Client) CreateDevice(ctx context.Context, d Device) (CreatedDevice, error) {
-	return c.send(ctx, http.MethodPost, "/api/v1/devices", d)
+	return c.send(ctx, http.MethodPost, devicePath(""), d)
 }
 
 // PutDevice replaces an existing device.
 func (c *Client) PutDevice(ctx context.Context, d Device) (CreatedDevice, error) {
-	path := "/api/v1/devices/" + url.PathEscape(d.DevEUI)
-	return c.send(ctx, http.MethodPut, path, d)
+	return c.send(ctx, http.MethodPut, devicePath(d.DevEUI), d)
+}
+
+// devicePath builds the provisioning route for one DevEUI, or for the collection
+// when devEUI is empty.
+//
+// The prefix repeats the network server's own route rather than sharing a
+// constant with it, because the two are separate modules with no shared package —
+// the ns would have to export its transport for the console to import it. What
+// keeps the duplication honest is that both sides name it, so changing one is a
+// visible edit in two places rather than a string in one and a guess in the other.
+func devicePath(devEUI string) string {
+	if devEUI == "" {
+		return nsDeviceRoute
+	}
+	return nsDeviceRoute + "/" + url.PathEscape(devEUI)
 }
 
 func (c *Client) send(ctx context.Context, method, path string, body Device) (CreatedDevice, error) {

@@ -1,4 +1,4 @@
-package semtech
+package transport_test
 
 import (
 	"context"
@@ -10,29 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
+	"github.com/fieldnode/lorawan-server/ns/test/testenv"
+	"github.com/fieldnode/lorawan-server/ns/test/testforwarder"
+
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
-	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/sim"
 )
-
-func mustKey(t *testing.T, s string) lorawan.AES128Key {
-	t.Helper()
-	v, err := lorawan.ParseAES128Key(s)
-	if err != nil {
-		t.Fatalf("ParseAES128Key(%q): %v", s, err)
-	}
-	return v
-}
-
-func mustNetID(t *testing.T, s string) lorawan.NetID {
-	t.Helper()
-	v, err := lorawan.ParseNetID(s)
-	if err != nil {
-		t.Fatalf("ParseNetID(%q): %v", s, err)
-	}
-	return v
-}
 
 // TestJoinAcceptOverRealUDP drives the whole path with no fakes in the middle:
 // a simulated device's join-request leaves as a Semtech PUSH_DATA over a real
@@ -46,10 +31,10 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 	ctx := context.Background()
 	store := engine.NewMemStore()
 
-	devEUI := mustEUI(t, "0011223344556677")
-	joinEUI := mustEUI(t, "0102030405060708")
-	appKey := mustKey(t, "2b7e151628aed2a6abf7158809cf4f3c")
-	netID := mustNetID(t, "010203")
+	devEUI := testenv.MustEUI64(t, "0011223344556677")
+	joinEUI := testenv.MustEUI64(t, "0102030405060708")
+	appKey := testenv.MustKey(t, "2b7e151628aed2a6abf7158809cf4f3c")
+	netID := testenv.MustNetID(t, "010203")
 
 	if err := store.SaveDevice(ctx, engine.NewOTAADevice(devEUI, joinEUI, appKey)); err != nil {
 		t.Fatalf("SaveDevice: %v", err)
@@ -72,7 +57,7 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 		t.Fatalf("engine.New: %v", err)
 	}
 
-	srv, err := New(Config{
+	srv, err := semtech.New(semtech.Config{
 		Addr:    "127.0.0.1:0",
 		Region:  "EU868",
 		Handler: eng,
@@ -87,9 +72,9 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 	defer srv.Close()
 	lazy.Set(srv)
 
-	gw := newFakeGateway(t, srv.ListenAddr())
-	gw.send(PullData, "")
-	gw.read() // PULL_ACK, and it teaches the server where the gateway lives
+	gw := testforwarder.New(t, srv.ListenAddr())
+	gw.Send(semtech.PullData, "")
+	gw.Read() // PULL_ACK, and it teaches the server where the gateway lives
 
 	dev := sim.New(devEUI, joinEUI, appKey, netID)
 	wire, err := dev.NextJoinRequest()
@@ -102,8 +87,8 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 		`"size":%d,"modu":"LORA","datr":"SF12BW125","codr":"4/5","data":"%s"}]}`,
 		uplinkTMST, len(wire), hex.EncodeToString(wire))
 
-	gw.send(PushData, body)
-	if h, _ := gw.read(); h.Type != PushAck {
+	gw.Send(semtech.PushData, body)
+	if h, _ := gw.Read(); h.Type != semtech.PushAck {
 		t.Fatalf("first reply = %s, want PUSH_ACK", h.Type)
 	}
 
@@ -119,8 +104,8 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 	}
 	readTXPK := func() txpk {
 		t.Helper()
-		h, b := gw.read()
-		if h.Type != PullResp {
+		h, b := gw.Read()
+		if h.Type != semtech.PullResp {
 			t.Fatalf("reply = %s, want PULL_RESP", h.Type)
 		}
 		var wrapper struct {
@@ -178,8 +163,16 @@ func TestJoinAcceptOverRealUDP(t *testing.T) {
 		t.Fatalf("the device rejected the join-accept that came back over UDP: %v", err)
 	}
 
-	if rec, ok := srv.reg.lookup(mustEUI(t, testGwEUI)); !ok || rec.DownlinksSent != 2 {
-		t.Errorf("registry = %+v (found=%v), want two downlinks recorded", rec, ok)
+	// The transport's own view of the gateway must show both transmissions.
+	// Gateways() is the exported registry read, the same one the dashboard uses.
+	var sent int
+	for _, rec := range srv.Gateways() {
+		if rec.EUI == testenv.MustEUI64(t, testforwarder.GatewayEUI) {
+			sent = int(rec.DownlinksSent)
+		}
+	}
+	if sent != 2 {
+		t.Errorf("the registry records %d downlinks for the gateway, want 2", sent)
 	}
 	if len(store.EventsOfKind(engine.EventJoinAccept)) != 1 {
 		t.Errorf("the join was not recorded: %+v", store.Events())

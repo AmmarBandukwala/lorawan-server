@@ -26,6 +26,22 @@ const (
 	KindJoin   = "join"
 )
 
+// Delivery defaults, applied when a Config leaves the field unset.
+const (
+	// DefaultBufferSize is how many events the queue holds before the radio path
+	// starts dropping. It is deliberately generous: an endpoint that restarts
+	// should drain on its own rather than cost events.
+	DefaultBufferSize = 256
+	// DefaultWorkers is one, which keeps events in order for a consumer. More
+	// workers deliver faster and out of order, so raising it is a decision a
+	// deployment makes explicitly.
+	DefaultWorkers = 1
+	// drainTimeout bounds a single delivery during shutdown. It stays well
+	// inside the orchestrator's kill window so a restart finishes cleanly rather
+	// than being SIGKILLed mid-request.
+	drainTimeout = 3 * time.Second
+)
+
 // Event is the application-facing view of one thing the network observed.
 //
 // It is a separate type from engine.UplinkRecord on purpose. The record is
@@ -119,10 +135,10 @@ type Stats struct {
 // New starts the delivery workers. Close must be called to stop them.
 func New(inner engine.Recorder, sinks []Sink, cfg Config) *Dispatcher {
 	if cfg.BufferSize <= 0 {
-		cfg.BufferSize = 256
+		cfg.BufferSize = DefaultBufferSize
 	}
 	if cfg.Workers <= 0 {
-		cfg.Workers = 1
+		cfg.Workers = DefaultWorkers
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -198,7 +214,7 @@ func (d *Dispatcher) drain() {
 		select {
 		case ev := <-d.queue:
 			d.queued.Add(-1)
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), drainTimeout)
 			d.deliver(ctx, ev)
 			cancel()
 		default:

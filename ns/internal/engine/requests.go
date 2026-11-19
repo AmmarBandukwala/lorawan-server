@@ -108,11 +108,11 @@ func recordUplinkHistory(ses *Session, fCnt uint32, snr float64) {
 		DataRate:     ses.DataRate,
 		TxPowerIndex: ses.TxPower,
 	})
-	if len(ses.UplinkHistory) > adrHistorySize {
+	if len(ses.UplinkHistory) > ADRHistorySize {
 		// Copying the tail into the same backing array avoids allocating on
 		// every uplink of every device once the window is full.
 		n := len(ses.UplinkHistory)
-		ses.UplinkHistory = append(ses.UplinkHistory[:0], ses.UplinkHistory[n-adrHistorySize:]...)
+		ses.UplinkHistory = append(ses.UplinkHistory[:0], ses.UplinkHistory[n-ADRHistorySize:]...)
 	}
 }
 
@@ -288,14 +288,16 @@ func (e *Engine) RequestNewChannel(ctx context.Context, devEUI lorawan.EUI64,
 		if index < 0 || index > region.MaxUserChannelIndex {
 			return fmt.Errorf("engine: channel index %d outside 0..%d", index, region.MaxUserChannelIndex)
 		}
-		if frequencyHz < 100_000 || frequencyHz > 1_000_000_000 {
-			return fmt.Errorf("engine: channel frequency %d Hz is outside any LoRaWAN band", frequencyHz)
+		if frequencyHz < region.MinChannelFrequencyHz || frequencyHz > region.MaxChannelFrequencyHz {
+			return fmt.Errorf("engine: channel frequency %d Hz is outside any LoRaWAN band (%d..%d Hz)",
+				frequencyHz, region.MinChannelFrequencyHz, region.MaxChannelFrequencyHz)
 		}
-		if frequencyHz%100 != 0 {
+		if frequencyHz%region.ChannelFrequencyStepHz != 0 {
 			// The on-air Freq field is in 100 Hz units; a finer value would be
 			// silently rounded and the device would sit on a different frequency
 			// from the one the operator typed.
-			return fmt.Errorf("engine: channel frequency %d Hz must be a multiple of 100 Hz", frequencyHz)
+			return fmt.Errorf("engine: channel frequency %d Hz must be a multiple of %d Hz",
+				frequencyHz, region.ChannelFrequencyStepHz)
 		}
 		if minDataRate < 0 || maxDataRate > 15 || minDataRate > maxDataRate {
 			return fmt.Errorf("engine: channel data-rate range DR%d..DR%d is not valid", minDataRate, maxDataRate)
@@ -368,7 +370,7 @@ func (e *Engine) applyADR(ctx context.Context, dev *Device, ses *Session, reg re
 		if ses.LinkADRRetries >= e.cfg.LinkADRMaxRetries {
 			e.recordEvent(ctx, Event{
 				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-				Reason: "adr_abandoned",
+				Reason: ReasonADRAbandoned,
 				Detail: fmt.Sprintf("LinkADRReq unanswered after %d attempts; leaving DR%d TX%d",
 					ses.LinkADRRetries, ses.DataRate, ses.TxPower),
 			})
@@ -382,7 +384,7 @@ func (e *Engine) applyADR(ctx context.Context, dev *Device, ses *Session, reg re
 		ses.ADRAckCnt = 0
 		e.recordEvent(ctx, Event{
 			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-			Reason: "adr_decision",
+			Reason: ReasonADRDecision,
 			Detail: fmt.Sprintf("%s; asking for DR%d TX%d NbTrans%d (allowed DR%d..DR%d)",
 				decision.Reason, decision.DataRate, decision.TxPowerIndex, decision.NbTrans, minDR, maxDR),
 		})
@@ -398,7 +400,7 @@ func (e *Engine) applyADR(ctx context.Context, dev *Device, ses *Session, reg re
 		ses.ADRAckCnt = 0
 		e.recordEvent(ctx, Event{
 			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-			Reason: "adr_keepalive",
+			Reason: ReasonADRKeepalive,
 			Detail: fmt.Sprintf("%d uplinks without a LinkADRReq; re-sending the current DR%d TX%d to reset the device's ADR counter",
 				e.cfg.ADRACKLimit+e.cfg.ADRACKDelay, ses.DataRate, ses.TxPower),
 		})

@@ -13,8 +13,12 @@ export type FacilitySettings = { configured: boolean; facilityName: string; regi
  */
 export type ConnectionState = 'loading' | 'connected' | 'degraded' | 'offline'
 
-/** The device-status filter. `All devices` is a filter value as well as a label. */
-export type DeviceFilter = 'All devices' | DeviceState
+/**
+ * The device-status filter. `all` means no filter; every other value is a device
+ * state to match exactly. Labels live in DEVICE_FILTERS so the wording can
+ * change without touching filtering.
+ */
+export type DeviceFilter = 'all' | DeviceState
 export type View = 'Overview' | 'Devices' | 'Gateways' | 'Events' | 'Settings'
 
 export const emptyOverview: Overview = {

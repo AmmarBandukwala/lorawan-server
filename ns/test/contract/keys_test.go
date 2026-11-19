@@ -1,16 +1,20 @@
-package lorawan
+package contract_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
+)
 
 // TestDeriveSessionKeys_LoRaWAN10 checks the LoRaWAN 1.0.3 §5 key derivation
 // against the worked example published with that specification's family of
 // implementations, so a change here cannot silently break interoperability.
 func TestDeriveSessionKeys_LoRaWAN10(t *testing.T) {
-	appKey, err := ParseAES128Key("01020304050607080102030405060708")
+	appKey, err := lorawan.ParseAES128Key("01020304050607080102030405060708")
 	if err != nil {
 		t.Fatal(err)
 	}
-	netID, err := ParseNetID("010203")
+	netID, err := lorawan.ParseNetID("010203")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +23,7 @@ func TestDeriveSessionKeys_LoRaWAN10(t *testing.T) {
 		devNonce  = 258
 	)
 
-	nwkSKey, err := DeriveNwkSKey(appKey, joinNonce, netID, devNonce)
+	nwkSKey, err := lorawan.DeriveNwkSKey(appKey, joinNonce, netID, devNonce)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +31,7 @@ func TestDeriveSessionKeys_LoRaWAN10(t *testing.T) {
 		t.Errorf("NwkSKey = %s, want %s", got, want)
 	}
 
-	appSKey, err := DeriveAppSKey(appKey, joinNonce, netID, devNonce)
+	appSKey, err := lorawan.DeriveAppSKey(appKey, joinNonce, netID, devNonce)
 	if err != nil {
 		t.Fatal(err)
 	}

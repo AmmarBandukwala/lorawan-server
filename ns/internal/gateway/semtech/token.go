@@ -61,6 +61,20 @@ func addrHash(addr *net.UDPAddr) uint16 {
 	return uint16(sum>>16) ^ uint16(sum)
 }
 
+// UplinkTokenTimestamp reports the concentrator timestamp an uplink was
+// received at, which is what a downlink's transmission time is derived from.
+// ok is false when the forwarder supplied no concentrator timing, in which case
+// a transport has nothing better to do than transmit immediately.
+//
+// This is the exported half of the token: a transport builds tokens with
+// makeToken when it accepts an uplink and reads them back here when the engine
+// asks it to transmit. The layout stays private so it can change without
+// touching callers.
+func UplinkTokenTimestamp(token [8]byte) (ts time.Duration, ok bool) {
+	_, _, ts, ok = parseToken(token)
+	return ts, ok
+}
+
 // downlinkTimestamp derives the concentrator timestamp a downlink must be
 // transmitted at. ok is false when the uplink carried no concentrator timing,
 // in which case the caller must fall back to an immediate transmission.

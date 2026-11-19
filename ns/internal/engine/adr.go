@@ -23,10 +23,15 @@ import (
 // rate is the device's own job (its ADRACKRUN counter), because a server that
 // lowers it here and there makes the link oscillate.
 
-// adrHistorySize is how many uplinks the algorithm looks at. Twenty is the
+// ADRHistorySize is how many uplinks the algorithm looks at. Twenty is the
 // window the application note's worked example uses, and a partial window
 // deliberately does not trigger a power change.
-const adrHistorySize = 20
+//
+// It is exported because it is part of the algorithm's observable behaviour: a
+// test that feeds the window full, or an operator reasoning about how long a
+// change takes to propagate, needs the number. Changing it changes how quickly
+// the network responds to a moving device.
+const ADRHistorySize = 20
 
 // adrStepDB is the SNR headroom one step costs.
 const adrStepDB = 3.0
@@ -195,12 +200,12 @@ func adrDecide(in adrInput) ADRDecision {
 	margin := snrMax - need - in.InstallationMargin
 	steps := int(margin / adrStepDB) // truncates toward zero, so a partial step buys nothing
 
-	if steps < 0 && countAtTxPower(in.History, in.TxPowerIndex) < adrHistorySize {
+	if steps < 0 && countAtTxPower(in.History, in.TxPowerIndex) < ADRHistorySize {
 		// The link looks short of headroom, but the window is not yet filled
 		// with frames at this power level. Raising power now invites the
 		// oscillation the guard exists to prevent: up, down, up.
 		resp.Reason = fmt.Sprintf("margin %.1f dB would raise power; waiting for %d samples at TX%d, have %d",
-			margin, adrHistorySize, in.TxPowerIndex, countAtTxPower(in.History, in.TxPowerIndex))
+			margin, ADRHistorySize, in.TxPowerIndex, countAtTxPower(in.History, in.TxPowerIndex))
 		return finishADR(resp, in)
 	}
 
@@ -273,7 +278,7 @@ func countAtTxPower(h []UplinkHistoryItem, txPowerIndex int) int {
 // over a full window. It returns 0 until the window is full, because a partial
 // window has no meaningful denominator.
 func packetLossPercentage(h []UplinkHistoryItem) float64 {
-	if len(h) < adrHistorySize {
+	if len(h) < ADRHistorySize {
 		return 0
 	}
 	var lost uint32

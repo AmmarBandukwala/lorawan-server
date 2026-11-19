@@ -29,7 +29,7 @@ func (s *apiServer) writeEngineError(w http.ResponseWriter, devEUI lorawan.EUI64
 		// Logged in full, reported in general: an internal message can carry SQL
 		// or a connection string.
 		s.log.Error("API request failed", "dev_eui", devEUI, "err", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusInternalServerError, msgInternal)
 	}
 }
 
@@ -58,6 +58,25 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
+
+// Failure messages for this API's 5xx responses.
+//
+// Unlike the console API, which returns snake_case codes a client can switch on,
+// this API returns a sentence: its audience is an operator reading a curl
+// response or a log line while debugging a live link, and "device store
+// unavailable" tells them more than "device_query_failed" does. They are named
+// here so the same failure always reads the same way, and so the wording of a
+// failure that appears in four handlers is changed in one place.
+//
+// None of them repeats the internal error, which is logged in full: it can carry
+// SQL or a connection string.
+const (
+	msgInternal         = "internal error"
+	msgStoreUnavailable = "device store unavailable"
+	msgDeviceSaveFailed = "device could not be saved"
+	msgDeviceDeleteFail = "device could not be deleted"
+	msgDeviceListFailed = "device list unavailable"
+)
 
 func badRequest(w http.ResponseWriter, msg string) { writeError(w, http.StatusBadRequest, msg) }
 func notFound(w http.ResponseWriter, msg string)   { writeError(w, http.StatusNotFound, msg) }

@@ -1,23 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Check, ChevronDown,
-  Menu, Plus, Radio, RadioTower, RefreshCw, Settings2, ShieldCheck, TriangleAlert, X,
+  Menu, Plus, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
 } from 'lucide-react'
-import { emptySnapshot, loadNetworkSnapshot, registerDevice, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
+import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
-import { emptySettings, type ConnectionState, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
+import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
+import { REFRESH_INTERVAL_MS } from './features/network/constants'
+import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
 import './App.css'
 
 const navigation: { name: View; icon: typeof Activity }[] = [
   { name: 'Overview', icon: Activity }, { name: 'Devices', icon: Boxes },
   { name: 'Gateways', icon: RadioTower }, { name: 'Events', icon: Radio },
 ]
-
-// How often the dashboard re-reads the API. A facility console shows "last seen"
-// values, so it has to move on its own rather than wait for a click; the
-// interval trades a live-feeling page against load on a server that may be
-// sharing a small machine with the network server.
-const refreshIntervalMs = 15_000
 
 function App() {
   const [view, setView] = useState<View>('Overview')
@@ -28,18 +24,11 @@ function App() {
   const { devices, overview, gateways, events, settings } = snapshot
   const [settingsDraft, setSettingsDraft] = useState<FacilitySettings>(emptySettings)
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<DeviceFilter>('All devices')
+  const [filter, setFilter] = useState<DeviceFilter>('all')
   const [showAdd, setShowAdd] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [connection, setConnection] = useState<ConnectionState>('loading')
   const [loading, setLoading] = useState(false)
-  const [newName, setNewName] = useState('')
-  const [newEui, setNewEui] = useState('')
-  const [newJoinEui, setNewJoinEui] = useState('')
-  const [newAppKey, setNewAppKey] = useState('')
-  const [newGroup, setNewGroup] = useState('')
-  const [registering, setRegistering] = useState(false)
-  const [registrationError, setRegistrationError] = useState('')
   const [settingsError, setSettingsError] = useState('')
   const [settingsMessage, setSettingsMessage] = useState('')
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -96,7 +85,7 @@ function App() {
       // A hidden tab does not need fresh data, and a dashboard left open for a
       // week should not quietly turn into a load generator.
       if (!document.hidden) void refreshNetworkSnapshot()
-    }, refreshIntervalMs)
+    }, REFRESH_INTERVAL_MS)
     return () => {
       clearTimeout(first)
       clearInterval(timer)
@@ -106,61 +95,20 @@ function App() {
 
   const filteredDevices = useMemo(() => devices.filter((device) => {
     const matchesQuery = `${device.name} ${device.eui} ${device.group}`.toLowerCase().includes(query.toLowerCase())
-    const matchesState = filter === 'All devices' || device.state === filter
+    const matchesState = filter === 'all' || device.state === filter
     return matchesQuery && matchesState
   }), [devices, filter, query])
 
-  async function addDevice(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    // A degraded API still accepts writes: one unreadable panel is not a
-    // reason to refuse an action whose own endpoint answered fine.
-    if (connection === 'offline' || connection === 'loading') {
-      setRegistrationError('Connect to the database API before registering a device.')
-      return
-    }
-    // Hex-only, upper-cased, so what is sent matches what the network server's
-    // schema checks for. The server validates again — this is for the message.
-    const hex = (value: string) => value.replace(/[^a-fA-F0-9]/g, '').toUpperCase()
-    const formattedEui = hex(newEui)
-    const formattedJoinEui = hex(newJoinEui)
-    const formattedKey = hex(newAppKey)
-
-    if (formattedEui.length !== 16) {
-      setRegistrationError('DevEUI must contain 16 hexadecimal characters.')
-      return
-    }
-    if (formattedJoinEui.length !== 0 && formattedJoinEui.length !== 16) {
-      setRegistrationError('JoinEUI is optional, but must contain 16 hexadecimal characters.')
-      return
-    }
-    if (formattedKey.length !== 32) {
-      setRegistrationError('AppKey must contain 32 hexadecimal characters. It is printed on the device label.')
-      return
-    }
-
-    setRegistering(true)
-    setRegistrationError('')
-    try {
-      const saved = await registerDevice({
-        name: newName,
-        devEui: formattedEui,
-        joinEui: formattedJoinEui,
-        appKey: formattedKey,
-        group: newGroup.trim() || 'Unassigned',
-      })
-      patchSnapshot({ devices: [saved, ...snapshotRef.current.devices] })
-    } catch (error) {
-      setRegistrationError(error instanceof Error ? error.message : 'Device could not be provisioned.')
-      setRegistering(false)
-      return
-    }
-    setNewName('')
-    setNewEui('')
-    setNewJoinEui('')
-    setNewAppKey('')
-    setNewGroup('')
-    setRegistrationError('')
-    setRegistering(false)
+  /**
+   * What the dialog does after the network server accepts a device.
+   *
+   * The new device is put into the snapshot immediately so the list reacts
+   * without waiting for the next poll, and the refresh that follows is what
+   * confirms it: if the device is not really there, the poll replaces the
+   * optimistic row rather than leaving a device on screen that cannot join.
+   */
+  function deviceRegistered(device: Device) {
+    patchSnapshot({ devices: [device, ...snapshotRef.current.devices] })
     setShowAdd(false)
     setView('Devices')
     void refreshNetworkSnapshot()
@@ -263,51 +211,11 @@ function App() {
       </main>
 
       {showAdd && (
-        <div className="modal-backdrop" onClick={() => setShowAdd(false)}>
-          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-heading">
-              <div>
-                <span className="modal-icon"><Plus size={18} /></span>
-                <div>
-                  <h2 id="modal-title">Register a device</h2>
-                  <p>Provision an OTAA end device on this network</p>
-                </div>
-              </div>
-              <button className="icon-button" aria-label="Close dialog" onClick={() => setShowAdd(false)}><X size={18} /></button>
-            </div>
-            <form onSubmit={addDevice}>
-              <label>Device name
-                <input autoFocus required value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Enter device name" />
-              </label>
-              <label>DevEUI <span>16 hexadecimal characters</span>
-                <input required value={newEui} onChange={(event) => setNewEui(event.target.value)} placeholder="0011223344556677" spellCheck={false} />
-              </label>
-              <label>AppKey <span>32 hexadecimal characters, printed on the device label</span>
-                <input required value={newAppKey} onChange={(event) => setNewAppKey(event.target.value)} placeholder="2b7e151628aed2a6abf7158809cf4f3c" spellCheck={false} />
-              </label>
-              <label>JoinEUI <span>optional — leave empty to accept any JoinEUI this device presents</span>
-                <input value={newJoinEui} onChange={(event) => setNewJoinEui(event.target.value)} placeholder="0102030405060708" spellCheck={false} />
-              </label>
-              <label>Group <span>optional label for the device list</span>
-                <input value={newGroup} onChange={(event) => setNewGroup(event.target.value)} placeholder="Unassigned" />
-              </label>
-              {registrationError && <p className="form-error" role="alert">{registrationError}</p>}
-              <div className="form-note">
-                <ShieldCheck size={15} />
-                {/* The honest version of the old note, which said this only added an
-                    inventory record. The key is what makes the device able to join,
-                    and the operator needs to know where it goes. */}
-                The AppKey is sent once to the network server and is never shown again. Keep a copy on the device label.
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="button button-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
-                <button type="submit" className="button button-primary" disabled={registering}>
-                  <Plus size={15} />{registering ? 'Provisioning…' : 'Register device'}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
+        <RegisterDeviceDialog
+          onClose={() => setShowAdd(false)}
+          onRegistered={deviceRegistered}
+          unreachable={connection === 'offline' || connection === 'loading'}
+        />
       )}
     </div>
   )

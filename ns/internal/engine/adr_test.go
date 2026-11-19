@@ -152,7 +152,7 @@ func TestADRDecideRaisesPowerOnlyOnAFullWindow(t *testing.T) {
 		t.Errorf("a 5-sample window must not change power: %+v", got)
 	}
 
-	in.History = historyAt(adrHistorySize, -10.0, 5, 2)
+	in.History = historyAt(ADRHistorySize, -10.0, 5, 2)
 	got := adrDecide(in)
 	if !got.Changed {
 		t.Fatalf("a full window of weak signal must raise power: %+v", got)
@@ -176,7 +176,7 @@ func TestADRDecideLowersADeviceAboveItsCeiling(t *testing.T) {
 		Region: eu868, Enabled: true,
 		DataRate: 7, TxPowerIndex: 0, NbTrans: 1, MaxTxPowerIndex: 5, MaxDataRate: 7,
 		InstallationMargin: DefaultADRInstallationMargin,
-		History:            historyAt(adrHistorySize, 0.0, 7, 0),
+		History:            historyAt(ADRHistorySize, 0.0, 7, 0),
 	})
 	if got.DataRate != 5 {
 		t.Errorf("DataRate = %d, want the 125 kHz ceiling 5 (%s)", got.DataRate, got.Reason)
@@ -190,7 +190,7 @@ func TestPacketLossPercentage(t *testing.T) {
 	}
 
 	// Every other counter missing: 19 gaps across 20 received frames.
-	sparse := historyAt(adrHistorySize, 5, 0, 0)
+	sparse := historyAt(ADRHistorySize, 5, 0, 0)
 	for i := range sparse {
 		sparse[i].FCnt = uint32(2*i + 1)
 	}
@@ -199,7 +199,7 @@ func TestPacketLossPercentage(t *testing.T) {
 	}
 
 	// One missing frame in twenty is 5 %.
-	one := historyAt(adrHistorySize, 5, 0, 0)
+	one := historyAt(ADRHistorySize, 5, 0, 0)
 	for i := 10; i < len(one); i++ {
 		one[i].FCnt++
 	}
@@ -236,12 +236,12 @@ func TestRecordUplinkHistoryBoundsTheWindow(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		recordUplinkHistory(&ses, uint32(i+1), float64(i))
 	}
-	if len(ses.UplinkHistory) != adrHistorySize {
-		t.Fatalf("history holds %d samples, want %d", len(ses.UplinkHistory), adrHistorySize)
+	if len(ses.UplinkHistory) != ADRHistorySize {
+		t.Fatalf("history holds %d samples, want %d", len(ses.UplinkHistory), ADRHistorySize)
 	}
-	if ses.UplinkHistory[0].FCnt != 11 || ses.UplinkHistory[adrHistorySize-1].FCnt != 30 {
+	if ses.UplinkHistory[0].FCnt != 11 || ses.UplinkHistory[ADRHistorySize-1].FCnt != 30 {
 		t.Errorf("window holds counters %d..%d, want 11..30",
-			ses.UplinkHistory[0].FCnt, ses.UplinkHistory[adrHistorySize-1].FCnt)
+			ses.UplinkHistory[0].FCnt, ses.UplinkHistory[ADRHistorySize-1].FCnt)
 	}
 	if ses.UplinkHistory[0].DataRate != 3 {
 		t.Error("a sample must record the data rate the uplink arrived on")

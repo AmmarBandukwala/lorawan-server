@@ -51,7 +51,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 				ses.PendingADR = nil
 				e.recordEvent(ctx, Event{
 					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-					Reason: "link_adr_rejected",
+					Reason: ReasonLinkADRRejected,
 					Detail: fmt.Sprintf("LinkADR refused (power=%t data-rate=%t channel=%t), keeping DR%d TX%d",
 						p.PowerACK, p.DataRateACK, p.ChannelACK, ses.DataRate, ses.TxPower),
 				})
@@ -153,7 +153,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 			if req == nil {
 				e.recordEvent(ctx, Event{
 					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-					Reason: "unexpected_mac_answer",
+					Reason: ReasonUnexpectedMACAnswer,
 					Detail: fmt.Sprintf("NewChannelAns with no request outstanding (frequency-ok=%t data-rate-ok=%t)",
 						p.ChannelFreqOK, p.DataRateRangeOK),
 				})
@@ -187,7 +187,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 			ses.PendingChannel = nil
 			e.recordEvent(ctx, Event{
 				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-				Reason: "new_channel_refused",
+				Reason: ReasonNewChannelRefused,
 				Detail: fmt.Sprintf("device refused channel %d (%d Hz, DR%d..DR%d): frequency-ok=%t data-rate-ok=%t",
 					req.Index, req.FrequencyHz, req.MinDataRate, req.MaxDataRate,
 					p.ChannelFreqOK, p.DataRateRangeOK),
@@ -203,7 +203,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 
 func (e *Engine) malformed(ctx context.Context, ses *Session, name string, err error) {
 	e.recordEvent(ctx, Event{
-		Kind: EventUplinkDrop, Reason: "malformed_mac_payload",
+		Kind: EventUplinkDrop, Reason: ReasonMalformedMACPayload,
 		Detail: fmt.Sprintf("%s: %v", name, err),
 		DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
 	})

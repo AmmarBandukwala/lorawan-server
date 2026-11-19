@@ -1,14 +1,17 @@
-package semtech
+package transport_test
 
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"testing"
 	"time"
+
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
+	"github.com/fieldnode/lorawan-server/ns/test/testenv"
+	"github.com/fieldnode/lorawan-server/ns/test/testforwarder"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
@@ -20,8 +23,8 @@ import (
 // simulated device that has already joined.
 type liveStack struct {
 	eng   *engine.Engine
-	srv   *Server
-	gw    *fakeGateway
+	srv   *semtech.Server
+	gw    *testforwarder.Forwarder
 	dev   *sim.Device
 	store *engine.MemStore
 }
@@ -31,10 +34,10 @@ func newLiveStack(t *testing.T) *liveStack {
 	ctx := context.Background()
 	store := engine.NewMemStore()
 
-	devEUI := mustEUI(t, "0011223344556677")
-	joinEUI := mustEUI(t, "0102030405060708")
-	appKey := mustKey(t, "2b7e151628aed2a6abf7158809cf4f3c")
-	netID := mustNetID(t, "010203")
+	devEUI := testenv.MustEUI64(t, "0011223344556677")
+	joinEUI := testenv.MustEUI64(t, "0102030405060708")
+	appKey := testenv.MustKey(t, "2b7e151628aed2a6abf7158809cf4f3c")
+	netID := testenv.MustNetID(t, "010203")
 
 	if err := store.SaveDevice(ctx, engine.NewOTAADevice(devEUI, joinEUI, appKey)); err != nil {
 		t.Fatalf("SaveDevice: %v", err)
@@ -52,7 +55,7 @@ func newLiveStack(t *testing.T) *liveStack {
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
 	}
-	srv, err := New(Config{
+	srv, err := semtech.New(semtech.Config{
 		Addr:    "127.0.0.1:0",
 		Region:  "EU868",
 		Handler: eng,
@@ -67,9 +70,8 @@ func newLiveStack(t *testing.T) *liveStack {
 	t.Cleanup(func() { _ = srv.Close() })
 	lazy.Set(srv)
 
-	gw := newFakeGateway(t, srv.ListenAddr())
-	gw.send(PullData, "")
-	gw.read() // PULL_ACK, and it teaches the server where the gateway lives
+	gw := testforwarder.New(t, srv.ListenAddr())
+	gw.Register() // teaches the server where this gateway lives
 
 	// Join, so the rest of the suite runs against a real session rather than a
 	// hand-built one.
@@ -78,11 +80,10 @@ func newLiveStack(t *testing.T) *liveStack {
 	if err != nil {
 		t.Fatalf("NextJoinRequest: %v", err)
 	}
-	gw.send(PushData, pushData(join, 868.1, "SF12BW125", 1_000_000))
-	gw.read() // PUSH_ACK
-	_, body := gw.read()
-	tx := decodeTXPK(t, body)
-	gw.read() // the same join-accept, scheduled in the second window
+	gw.Send(semtech.PushData, pushData(join, 868.1, "SF12BW125", 1_000_000))
+	gw.Read() // PUSH_ACK
+	tx := gw.ReadDownlink()
+	gw.Read() // the same join-accept, scheduled in the second window
 
 	raw, err := hex.DecodeString(tx.Data)
 	if err != nil {
@@ -100,27 +101,6 @@ func pushData(frame []byte, freqMHz float64, datr string, tmst uint32) string {
 		`{"rxpk":[{"tmst":%d,"freq":%g,"rssi":-70,"lsnr":9,"size":%d,`+
 			`"modu":"LORA","datr":"%s","codr":"4/5","data":"%s"}]}`,
 		tmst, freqMHz, len(frame), datr, hex.EncodeToString(frame))
-}
-
-func decodeTXPK(t *testing.T, body []byte) DownlinkCommand {
-	t.Helper()
-	var wrapper struct {
-		Tx DownlinkCommand `json:"txpk"`
-	}
-	if err := json.Unmarshal(body, &wrapper); err != nil {
-		t.Fatalf("decode txpk %s: %v", body, err)
-	}
-	return wrapper.Tx
-}
-
-// readDownlink decodes the next PULL_RESP the server pushes.
-func readDownlink(t *testing.T, gw *fakeGateway) DownlinkCommand {
-	t.Helper()
-	h, body := gw.read()
-	if h.Type != PullResp {
-		t.Fatalf("reply = %s, want PULL_RESP", h.Type)
-	}
-	return decodeTXPK(t, body)
 }
 
 // TestApplicationDownlinkLeavesInTheNextWindow is the M5 path end to end: an
@@ -144,10 +124,10 @@ func TestApplicationDownlinkLeavesInTheNextWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NextUplink: %v", err)
 	}
-	st.gw.send(PushData, pushData(up, 868.1, "SF7BW125", 5_000_000))
-	st.gw.read() // PUSH_ACK
+	st.gw.Send(semtech.PushData, pushData(up, 868.1, "SF7BW125", 5_000_000))
+	st.gw.Read() // PUSH_ACK
 
-	tx := readDownlink(t, st.gw)
+	tx := st.gw.ReadDownlink()
 	raw, err := hex.DecodeString(tx.Data)
 	if err != nil {
 		t.Fatalf("txpk data is not hex: %v", err)
@@ -210,32 +190,25 @@ func TestQueuedDownlinkIsDeliveredOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NextUplink: %v", err)
 	}
-	st.gw.send(PushData, pushData(up, 868.1, "SF7BW125", 5_000_000))
-	st.gw.read() // PUSH_ACK
-	readDownlink(t, st.gw)
+	st.gw.Send(semtech.PushData, pushData(up, 868.1, "SF7BW125", 5_000_000))
+	st.gw.Read() // PUSH_ACK
+	st.gw.ReadDownlink()
 	// The network answers in both windows, so the same frame is also scheduled in
 	// RX2. That is not a duplicate delivery: both copies carry the same FCntDown,
 	// and a LoRaWAN device discards a frame whose downlink counter it has already
 	// seen, so the application payload is handed up once.
-	readDownlink(t, st.gw)
+	st.gw.ReadDownlink()
 
 	// A second uplink with nothing queued must produce no downlink at all.
 	up2, err := st.dev.NextUplink(sim.UplinkOptions{FPort: 1, Payload: []byte{0x02}})
 	if err != nil {
 		t.Fatalf("NextUplink: %v", err)
 	}
-	st.gw.send(PushData, pushData(up2, 868.3, "SF7BW125", 20_000_000))
-	st.gw.read() // PUSH_ACK
+	st.gw.Send(semtech.PushData, pushData(up2, 868.3, "SF7BW125", 20_000_000))
+	st.gw.Read() // PUSH_ACK
 
 	// The read deadline makes "nothing arrives" observable rather than a hang.
-	if err := st.gw.conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond)); err != nil {
-		t.Fatalf("set a read deadline: %v", err)
-	}
-	buf := make([]byte, 4096)
-	n, _, err := st.gw.conn.ReadFrom(buf)
-	if err == nil {
-		h, perr := ParseHeader(buf[:n])
-		t.Errorf("an unexpected frame arrived after the downlink was delivered: %d bytes (%v, %v)",
-			n, h.Type, perr)
+	if h, _, arrived := st.gw.ReadWithin(250 * time.Millisecond); arrived {
+		t.Errorf("an unexpected frame arrived after the downlink was delivered: %s", h.Type)
 	}
 }
