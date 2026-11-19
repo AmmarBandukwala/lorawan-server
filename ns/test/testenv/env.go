@@ -135,27 +135,8 @@ type Env struct {
 func New(t *testing.T, mutate func(*engine.Config)) *Env {
 	t.Helper()
 
-	cfg := engine.DefaultConfig()
-	cfg.NetID = MustNetID(t, "010203")
-	cfg.Region = "EU868"
-	if mutate != nil {
-		mutate(&cfg)
-	}
-
-	clk := &Clock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
 	store := engine.NewMemStore()
-	gw := &Gateway{}
-
-	eng, err := engine.New(cfg, store.Store(), gw,
-		engine.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
-		engine.WithClock(clk.Now),
-		// Run scheduled transmissions inline so assertions are deterministic.
-		engine.WithScheduler(func(_ time.Duration, fn func()) { fn() }),
-	)
-	if err != nil {
-		t.Fatalf("engine.New: %v", err)
-	}
-	return &Env{t: t, Engine: eng, Store: store, GW: gw, Clock: clk}
+	return newOnStore(t, store, store.Store(), mutate)
 }
 
 // Provision stores an OTAA (otaa=true) or ABP device and returns it.
@@ -270,6 +251,187 @@ func UplinkFrame(wire []byte, window gateway.RxWindow, freqHz uint32, dr int) ga
 		RSSI:          -72,
 		SNR:           8.5,
 	}
+}
+
+// SharedState is what two engine instances must share to behave like one
+// network rather than two that happen to hear the same radio.
+type SharedState struct {
+	// Seen is the frame de-duplication book. Two instances fed by one gateway
+	// each receive the same frame; only one may answer it.
+	Seen engine.SeenRepo
+	// Airtime is the duty-cycle ledger. Sharing it makes the two instances'
+	// combined transmissions add up, which is what compliance requires.
+	Airtime engine.AirtimeRepo
+}
+
+// NewShared builds an engine with its own device and session store but a
+// caller-supplied shared book.
+//
+// It exists so a test can stand up two engines against one gateway and assert
+// they answer a frame once, which is the property a single-instance test cannot
+// observe at all. Each engine keeps its own sessions: sharing those would be a
+// different, larger change.
+func NewShared(t *testing.T, shared SharedState, mutate func(*engine.Config)) *Env {
+	t.Helper()
+
+	store := engine.NewMemStore()
+	st := store.Store()
+	st.Seen = shared.Seen
+	st.Airtime = shared.Airtime
+	return newOnStore(t, store, st, mutate)
+}
+
+// newOnStore is the shared construction path behind New and NewShared.
+func newOnStore(t *testing.T, store *engine.MemStore, st engine.Store,
+	mutate func(*engine.Config)) *Env {
+
+	cfg := engine.DefaultConfig()
+	cfg.NetID = MustNetID(t, "010203")
+	cfg.Region = "EU868"
+	if mutate != nil {
+		mutate(&cfg)
+	}
+
+	clk := &Clock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
+	gw := &Gateway{}
+
+	eng, err := engine.New(cfg, st, gw,
+		engine.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		engine.WithClock(clk.Now),
+		// Run scheduled transmissions inline so assertions are deterministic.
+		engine.WithScheduler(func(_ time.Duration, fn func()) { fn() }),
+	)
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	return &Env{t: t, Engine: eng, Store: store, GW: gw, Clock: clk}
+}
+
+// SharedSeen is an in-memory de-duplication book that several engines can point
+// at, standing in for the Postgres table in a test of multi-instance behaviour.
+//
+// It implements the same window semantics as the real one: a claim succeeds when
+// the key is new or has aged out.
+type SharedSeen struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+// NewSharedSeen returns an empty book.
+func NewSharedSeen() *SharedSeen {
+	return &SharedSeen{seen: map[string]time.Time{}}
+}
+
+// ClaimFrame implements engine.SeenRepo.
+func (s *SharedSeen) ClaimFrame(_ context.Context, key string, window time.Duration) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	if at, ok := s.seen[key]; ok && now.Sub(at) < window {
+		return false, nil
+	}
+	s.seen[key] = now
+	return true, nil
+}
+
+// Claims is how many distinct frames the book holds, for a test that wants to
+// assert the book was actually consulted rather than bypassed.
+// Claims reports how many frames are held, for assertions about the book itself.
+func (s *SharedSeen) Claims() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.seen)
+}
+
+// SharedLedger is an in-memory stand-in for ns_airtime, so the durability of the
+// duty-cycle books can be tested without a database.
+//
+// It stores what it was given rather than mirroring the engine's own structure:
+// SaveAirtime replaces the whole window, exactly as the Postgres flush does, so a
+// test that writes the ledger and hands the same object to a second engine
+// reproduces a restart rather than approximating one.
+//
+// Ageing is judged by the engine's clock, which WithClock wires up. Judging it by
+// the wall clock instead compares a fake-clock booking against real time, and the
+// test passes only while the fake timestamp happens to sit within a window of
+// now — deterministic-looking, and wrong on a Monday.
+type SharedLedger struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	records []engine.AirtimeRecord
+	flushes int
+}
+
+// NewSharedLedger returns an empty ledger.
+func NewSharedLedger() *SharedLedger { return &SharedLedger{now: time.Now} }
+
+// WithClock points the ledger at an environment's clock so its idea of "inside
+// the window" matches the engine's.
+func (l *SharedLedger) WithClock(c *Clock) *SharedLedger {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if c != nil {
+		l.now = c.Now
+	}
+	return l
+}
+
+// SaveAirtime replaces the window with what was handed over.
+func (l *SharedLedger) SaveAirtime(_ context.Context, records []engine.AirtimeRecord,
+	window time.Duration) error {
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.flushes++
+
+	cutoff := l.now().Add(-window)
+	l.records = l.records[:0]
+	for _, r := range records {
+		if r.Start.Before(cutoff) {
+			continue
+		}
+		l.records = append(l.records, r)
+	}
+	return nil
+}
+
+// LoadAirtime returns the bookings still inside the window.
+func (l *SharedLedger) LoadAirtime(_ context.Context, window time.Duration) ([]engine.AirtimeRecord, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cutoff := l.now().Add(-window)
+	var out []engine.AirtimeRecord
+	for _, r := range l.records {
+		if r.Start.Before(cutoff) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// Flushes counts writes, so a test can assert the engine actually persisted
+// rather than merely being able to.
+func (l *SharedLedger) Flushes() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.flushes
+}
+
+// Booked is the airtime recorded for one gateway and sub-band.
+func (l *SharedLedger) Booked(gateway lorawan.EUI64, minHz uint32) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	var total time.Duration
+	for _, r := range l.records {
+		if r.Gateway == gateway && r.MinHz == minHz {
+			total += r.Airtime
+		}
+	}
+	return total
 }
 
 // --- parsers that fail the test instead of returning an error -----------------

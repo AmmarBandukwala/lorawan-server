@@ -63,7 +63,15 @@ func (s *Store) Close() { s.pool.Close() }
 
 // Store wires this implementation into the engine's port bundle.
 func (s *Store) Store() engine.Store {
-	return engine.Store{Devices: s, Sessions: s, Recorder: s}
+	return engine.Store{
+		Devices:  s,
+		Sessions: s,
+		Recorder: s,
+		// The two optional books are what make duty-cycle accounting and frame
+		// de-duplication survive a restart or span processes.
+		Airtime: s,
+		Seen:    s,
+	}
 }
 
 // Migrate applies every embedded migration that has not run yet, in one

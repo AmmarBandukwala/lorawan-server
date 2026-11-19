@@ -105,6 +105,19 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 		return fmt.Errorf("build the engine: %w", err)
 	}
 
+	// Reload the duty-cycle ledger before the first gateway can be heard from.
+	// A server that starts with an empty book would treat an allowance it had
+	// already spent as untouched, which is the one thing the enforcement was
+	// added to prevent. Failing to read it is not fatal: enforcing from an empty
+	// ledger is still stricter than not enforcing.
+	if restored, err := eng.RestoreAirtime(ctx); err != nil {
+		log.Warn("could not reload the duty-cycle ledger; enforcing from an empty one",
+			"err", err)
+	} else if restored > 0 {
+		log.Info("reloaded the duty-cycle ledger", "bookings", restored,
+			"window", eng.AirtimeWindow())
+	}
+
 	srv, err := semtech.New(semtech.Config{
 		Addr:           cfg.listenAddr,
 		Region:         cfg.region,
@@ -125,6 +138,12 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	// it is ordered before the pool closes, because its final flush writes.
 	stopGatewayPersister := startGatewayPersister(ctx, log.With("component", "gateway-store"),
 		srv, gatewayStore, cfg.region, cfg.gatewayFlushInterval)
+
+	// The duty-cycle ledger and the frame de-duplication book are persisted for
+	// the same reason presence is: the in-memory version is a claim about the
+	// radio that a restart voids. Stopping it is ordered before the pool closes.
+	stopLedgerPersister := startLedgerPersister(ctx, log.With("component", "ledger-store"),
+		eng, ledgerSinkOf(store), cfg.ledgerFlushInterval)
 
 	var status *statusServer
 	if cfg.statusAddr != "" && !strings.EqualFold(cfg.statusAddr, "off") {
@@ -182,6 +201,7 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	}
 	closeIntegrations()
 	// Before the pool: the final flush is a write.
+	stopLedgerPersister()
 	stopGatewayPersister()
 	closeStore()
 	return errors.Join(errs...)

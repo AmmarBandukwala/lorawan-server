@@ -405,6 +405,39 @@ type Store struct {
 	Devices  DeviceRepo
 	Sessions SessionRepo
 	Recorder Recorder
+
+	// Airtime persists the duty-cycle ledger. Optional: with the in-memory store
+	// there is nothing to persist to, and a single process holding the whole
+	// window in memory is already correct.
+	Airtime AirtimeRepo
+
+	// Seen is the frame de-duplication book, shared across processes when one
+	// gateway feeds more than one network-server instance. Optional for the same
+	// reason as Airtime.
+	Seen SeenRepo
+}
+
+// AirtimeRepo persists the duty-cycle ledger across restarts and, when two
+// servers share a gateway, across processes.
+//
+// SaveAirtime writes the ledger as it currently stands and must be idempotent,
+// because the same booking is written on every flush until it ages out. The
+// window is passed in rather than configured on the store: it is the engine's
+// setting, and a store that kept its own copy could disagree with the engine
+// about what still counts.
+type AirtimeRepo interface {
+	SaveAirtime(ctx context.Context, records []AirtimeRecord, window time.Duration) error
+	LoadAirtime(ctx context.Context, window time.Duration) ([]AirtimeRecord, error)
+}
+
+// SeenRepo answers "has any process handled this frame recently?" and claims it
+// if not.
+//
+// The claim must be atomic: two instances receiving the same radio frame at the
+// same moment is the normal case, not a race worth losing, and a check-then-write
+// would let both answer with a join-accept.
+type SeenRepo interface {
+	ClaimFrame(ctx context.Context, key string, window time.Duration) (bool, error)
 }
 
 // Validate reports a missing port so misconfiguration fails at startup rather

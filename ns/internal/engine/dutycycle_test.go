@@ -352,3 +352,117 @@ func TestEngineDutyCycleEnforcementCanBeDisabled(t *testing.T) {
 		t.Errorf("denial events = %d, want none when enforcement is off", len(denied))
 	}
 }
+
+// TestRestoreAirtimeCarriesTheWindowAcrossARestart is the guarantee the ledger
+// exists for: a server that comes back up must not transmit straight through an
+// allowance it had already spent.
+//
+// The scenario is one process writing its books and a second, freshly built
+// process reading them, which is what a restart is. The contrast case matters as
+// much as the main assertion: an engine that does not restore happily fills a
+// sub-band its predecessor already exhausted, so if the restore ever becomes a
+// no-op the test still says which half broke.
+func TestRestoreAirtimeCarriesTheWindowAcrossARestart(t *testing.T) {
+	ctx := context.Background()
+	clk := &fakeClock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
+	books := newFakeBooks().withClock(clk.now)
+	gw := mustEUI64(t, testGwEUI)
+	reg := mustEU868(t)
+
+	// The instance that has been running: it fills the sub-band, then persists.
+	running := newTestEnvWithBooks(t, books, clk, nil)
+	running.exhaustSubBand(eu868Ch0Hz, eu868DR5)
+	books.flush(t, running.eng)
+
+	filled := books.booked(gw, subBandMinHzOf(t, reg, eu868Ch0Hz))
+	if filled == 0 {
+		t.Fatal("the flush wrote nothing, so the rest of this test proves nothing")
+	}
+
+	// A fresh process, same books, same clock.
+	restarted := newTestEnvWithBooks(t, books, clk, nil)
+	restored, err := restarted.eng.RestoreAirtime(ctx)
+	if err != nil {
+		t.Fatalf("RestoreAirtime: %v", err)
+	}
+	if restored == 0 {
+		t.Fatal("RestoreAirtime read back nothing from a ledger that holds airtime")
+	}
+
+	// The restored engine must refuse what a fresh one would allow.
+	perm := restarted.eng.budget.reserve(gw, reg, eu868Ch0Hz, eu868DR5, 12, clk.now())
+	if perm.Allowed {
+		t.Errorf("a restarted server booked another transmission into a sub-band holding %v",
+			filled)
+	}
+
+	fresh := newTestEnv(t, nil)
+	if p := fresh.eng.budget.reserve(gw, reg, eu868Ch0Hz, eu868DR5, 12, clk.now()); !p.Allowed {
+		t.Errorf("the contrast case is broken: an engine with no history was refused (%s)",
+			p.Reason)
+	}
+
+	// The operator has to be able to see the inherited occupancy, or the refusals
+	// look like a radio fault.
+	usage := restarted.eng.DutyCycleUsage()
+	if len(usage) == 0 {
+		t.Fatal("a restored engine reports no duty-cycle usage")
+	}
+	var seen bool
+	for _, u := range usage {
+		if u.Used > 0 {
+			seen = true
+		}
+	}
+	if !seen {
+		t.Errorf("every restored sub-band reports zero usage: %+v", usage)
+	}
+}
+
+// TestRestoreAirtimeIgnoresAnEmptyBook keeps a first boot honest: there is
+// nothing to read, and that must not look like an error or leave the engine
+// unable to transmit.
+func TestRestoreAirtimeIgnoresAnEmptyBook(t *testing.T) {
+	ctx := context.Background()
+	books := newFakeBooks()
+	clk := &fakeClock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
+
+	eng := newTestEnvWithBooks(t, books, clk, nil)
+	n, err := eng.eng.RestoreAirtime(ctx)
+	if err != nil {
+		t.Fatalf("RestoreAirtime on an empty ledger: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("restored %d bookings from an empty ledger", n)
+	}
+
+	perm := eng.eng.budget.reserve(mustEUI64(t, testGwEUI), mustEU868(t),
+		eu868Ch0Hz, eu868DR5, 12, clk.now())
+	if !perm.Allowed {
+		t.Errorf("a first boot cannot transmit: %s", perm.Reason)
+	}
+}
+
+// TestRestoreAirtimeWithoutARepoIsANoOp: the in-memory store has nowhere to read
+// from, and a startup must not fail because of it.
+func TestRestoreAirtimeWithoutARepoIsANoOp(t *testing.T) {
+	eng := newTestEnv(t, nil)
+	n, err := eng.eng.RestoreAirtime(context.Background())
+	if err != nil {
+		t.Fatalf("RestoreAirtime without a repository: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("restored %d bookings with no repository", n)
+	}
+}
+
+// subBandMinHzOf resolves the sub-band a frequency falls in, so the assertions
+// look the ledger up by the same key the engine wrote it under.
+func subBandMinHzOf(t *testing.T, reg region.Region, freqHz uint32) uint32 {
+	t.Helper()
+	band, ok := reg.SubBandFor(freqHz)
+	if !ok {
+		t.Fatalf("%d Hz falls outside every duty-cycle sub-band of %s", freqHz, reg.CommonName())
+	}
+	return band.MinHz
+}

@@ -39,7 +39,13 @@ type config struct {
 	// ns_gateways. It sets how stale the dashboard's gateway panel can get, and
 	// the write rate the database sees from gateway presence — nothing more.
 	gatewayFlushInterval time.Duration
-	logLevel             slog.Level
+
+	// ledgerFlushInterval is how often the duty-cycle ledger and the frame
+	// de-duplication book are written. Unlike presence, this one bounds a
+	// compliance claim: a crash forgets the bookings made since the last flush,
+	// so the interval is the window of occupancy a restart under-counts.
+	ledgerFlushInterval time.Duration
+	logLevel            slog.Level
 
 	// disableDutyCycle turns off the server's own airtime enforcement. It
 	// exists for test rigs and for concentrators known to enforce locally;
@@ -78,6 +84,7 @@ func loadConfig() (config, error) {
 		seedDevices:          strings.TrimSpace(os.Getenv("NS_SEED_DEVICES")),
 		gatewayTimeout:       envDuration("NS_GATEWAY_TIMEOUT", 3*time.Minute),
 		gatewayFlushInterval: envDuration("NS_GATEWAY_FLUSH_INTERVAL", 30*time.Second),
+		ledgerFlushInterval:  envDuration("NS_LEDGER_FLUSH_INTERVAL", DefaultLedgerFlushInterval),
 	}
 
 	netIDStr := envString("NS_NET_ID", "000000")

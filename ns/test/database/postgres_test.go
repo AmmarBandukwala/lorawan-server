@@ -23,6 +23,22 @@ import (
 //	  go test ./internal/storage/pgstore/
 const dsnEnv = "NS_TEST_DSN"
 
+// openStore connects to the configured PostgreSQL or skips the test.
+func openStore(t *testing.T) (context.Context, *pgstore.Store) {
+	t.Helper()
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		t.Skipf("%s is not set; skipping the PostgreSQL round trip", dsnEnv)
+	}
+	ctx := context.Background()
+	store, err := pgstore.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open (connect + migrate): %v", err)
+	}
+	t.Cleanup(store.Close)
+	return ctx, store
+}
+
 func mustEUI(t *testing.T, s string) lorawan.EUI64 {
 	t.Helper()
 	v, err := lorawan.ParseEUI64(s)

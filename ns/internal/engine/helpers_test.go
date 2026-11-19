@@ -123,6 +123,140 @@ func newTestEnv(t *testing.T, mutate func(*Config)) *testEnv {
 	return &testEnv{t: t, eng: eng, store: store, gw: gw, clk: clk}
 }
 
+// newTestEnvWithBooks builds an engine wired to shared, durable books. It is how
+// a restart is simulated: build one engine, flush its books, then build a second
+// engine against the same objects and restore.
+//
+// The clock is passed through rather than created fresh so both engines agree on
+// what "now" is; a restart test that let time move would be measuring the window
+// rather than the persistence.
+func newTestEnvWithBooks(t *testing.T, books *fakeBooks, clk *fakeClock,
+	mutate func(*Config)) *testEnv {
+
+	t.Helper()
+
+	cfg := DefaultConfig()
+	cfg.NetID = mustNetID(t, "010203")
+	cfg.Region = "EU868"
+	if mutate != nil {
+		mutate(&cfg)
+	}
+	if clk == nil {
+		clk = &fakeClock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
+	}
+
+	store := NewMemStore()
+	st := store.Store()
+	st.Airtime = books
+	st.Seen = books
+
+	eng, err := New(cfg, st, &fakeGateway{},
+		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
+		WithClock(clk.now),
+		WithScheduler(func(_ time.Duration, fn func()) { fn() }),
+	)
+	if err != nil {
+		t.Fatalf("engine.New: %v", err)
+	}
+	return &testEnv{t: t, eng: eng, store: store, gw: eng.gw.(*fakeGateway), clk: clk}
+}
+
+// fakeBooks is the durable layer in test form: a de-duplication book and an
+// airtime ledger that outlive any one engine. Handing the same value to two
+// engines is what makes "the process restarted" testable, as opposed to
+// "the in-memory map was still there", which is the thing every single-instance
+// test quietly assumes.
+//
+// It decides what has aged out using the engine's clock, not the wall clock. A
+// ledger that reads time.Now() while the engine runs on a fake clock disagrees
+// with it about what "recently" means, and the failure is the worst kind: the
+// test passes in the hour it was written and starts failing once the fake
+// timestamp falls behind real time by more than the window.
+type fakeBooks struct {
+	mu      sync.Mutex
+	now     func() time.Time
+	seen    map[string]time.Time
+	records []AirtimeRecord
+}
+
+func newFakeBooks() *fakeBooks {
+	return &fakeBooks{seen: map[string]time.Time{}, now: time.Now}
+}
+
+// withClock points the books at an engine's clock. It returns the receiver so a
+// test can build and wire it in one expression.
+func (b *fakeBooks) withClock(now func() time.Time) *fakeBooks {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.now = now
+	return b
+}
+
+func (b *fakeBooks) ClaimFrame(_ context.Context, key string, window time.Duration) (bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	now := b.now()
+	if at, ok := b.seen[key]; ok && now.Sub(at) < window {
+		return false, nil
+	}
+	b.seen[key] = now
+	return true, nil
+}
+
+func (b *fakeBooks) SaveAirtime(_ context.Context, records []AirtimeRecord,
+	window time.Duration) error {
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	cutoff := b.now().Add(-window)
+	b.records = b.records[:0]
+	for _, r := range records {
+		if !r.Start.Before(cutoff) {
+			b.records = append(b.records, r)
+		}
+	}
+	return nil
+}
+
+func (b *fakeBooks) LoadAirtime(_ context.Context, window time.Duration) ([]AirtimeRecord, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	cutoff := b.now().Add(-window)
+	var out []AirtimeRecord
+	for _, r := range b.records {
+		if !r.Start.Before(cutoff) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// flush writes an engine's current books, standing in for the periodic persister.
+func (b *fakeBooks) flush(t *testing.T, eng *Engine) {
+	t.Helper()
+	eng.PruneAirtime()
+	if err := b.SaveAirtime(context.Background(), eng.AirtimeSnapshot(), eng.AirtimeWindow()); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+}
+
+// booked is the airtime the book holds for one gateway and sub-band.
+func (b *fakeBooks) booked(gateway lorawan.EUI64, minHz uint32) time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	var total time.Duration
+	for _, r := range b.records {
+		if r.Gateway == gateway && r.MinHz == minHz {
+			total += r.Airtime
+		}
+	}
+	return total
+}
+
 func mustNetID(t *testing.T, s string) lorawan.NetID {
 	t.Helper()
 	n, err := lorawan.ParseNetID(s)

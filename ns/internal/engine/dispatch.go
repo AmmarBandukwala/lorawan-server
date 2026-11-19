@@ -39,9 +39,21 @@ func (e *Engine) HandleUplink(ctx context.Context, frame gateway.UplinkFrame) er
 
 	// The same frame is usually received by several gateways. Answer it once.
 	key := dedupKey(phy)
-	if key != "" && e.isDuplicate(key) {
-		return e.dropEvent(ctx, frame, phy, ReasonDuplicateFrame,
-			"identical frame already processed within the dedup window")
+	if key != "" {
+		duplicate, err := e.claimFrame(ctx, key)
+		if err != nil {
+			// Fail open. The shared book being unreachable is a database
+			// problem, and treating every frame as a duplicate over it would
+			// silence the whole network; the in-memory book still catches the
+			// single-instance case that accounts for nearly all duplicates.
+			e.log.Warn("shared de-duplication book unavailable, falling back to memory",
+				"gateway", frame.GatewayID, "err", err)
+			duplicate = e.isDuplicate(key)
+		}
+		if duplicate {
+			return e.dropEvent(ctx, frame, phy, ReasonDuplicateFrame,
+				"identical frame already processed within the dedup window")
+		}
 	}
 
 	switch phy.MHDR.MType {
@@ -72,7 +84,8 @@ func dedupKey(phy *lorawan.PHYPayload) string {
 }
 
 // isDuplicate reports whether this key was seen inside the dedup window and
-// records it otherwise.
+// records it otherwise. This is the process-local book: correct on its own for a
+// single server, and the fallback when a shared book cannot be reached.
 func (e *Engine) isDuplicate(key string) bool {
 	now := e.now()
 
@@ -91,6 +104,22 @@ func (e *Engine) isDuplicate(key string) bool {
 		}
 	}
 	return false
+}
+
+// claimFrame asks whether this frame may be handled.
+//
+// With a shared book configured it is the authority, because two instances fed by
+// one gateway each receive the same radio frame and only one of them may answer.
+// Without one, the process-local map is used.
+func (e *Engine) claimFrame(ctx context.Context, key string) (bool, error) {
+	if e.store.Seen == nil {
+		return e.isDuplicate(key), nil
+	}
+	fresh, err := e.store.Seen.ClaimFrame(ctx, key, e.cfg.DedupWindow)
+	if err != nil {
+		return false, err
+	}
+	return !fresh, nil
 }
 
 // generateDevAddr builds a device address whose top 7 bits carry the NetID

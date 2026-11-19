@@ -152,6 +152,45 @@ want it three times. `/status` publishes the dispatcher's counters, where a
 growing `dropped` is the signal that a receiver is too slow.
 
 
+## Shared state across processes
+
+One forwarder delivers every radio frame to each network-server address it is
+configured to send to, and duty-cycle limits are a property of the gateway and
+the band rather than of the process that happens to be holding it. Neither
+question — "has anyone answered this frame?" and "can this gateway still
+transmit?" — has an answer that lives inside one process, so both live in
+PostgreSQL:
+
+| Table | Answers | Written |
+| --- | --- | --- |
+| `ns_seen` | may *this* frame be answered? | inline, one conditional `INSERT` per frame |
+| `ns_airtime` | how much of the sub-band's window is spent? | on a timer, `NS_LEDGER_FLUSH_INTERVAL` |
+
+The asymmetry is deliberate. A claim must be atomic at the moment of decision —
+a `SELECT` then `INSERT` lets two instances both see a frame as new and both emit
+a join-accept, and that is the normal case whenever a frame reaches two gateways,
+not a rare race. So the claim is one statement whose `ON CONFLICT … WHERE` clause
+encodes both "the key is new" and "the old claim has aged out", and it is the
+only round trip the uplink path makes.
+
+Airtime is the opposite shape. The decision to transmit must not wait on the
+database, so it reads an in-memory ledger, and durability is about the next
+restart rather than the next packet — a restart does not need the last fifteen
+seconds of occupancy on disk to be honest about the hour. Bookings are therefore
+flushed on a timer, whole rather than as a delta, with `ON CONFLICT DO NOTHING`
+making each repeat a no-op. Airtime is rounded **up** to the millisecond: the
+column is the evidence an allowance was respected, and the only safe direction to
+be wrong in is the one that over-books.
+
+Both tables age themselves out. A claim that never expired would discard a
+device's legitimate retransmission forever, and a ledger that only grew would
+charge a server for emissions the regulation no longer counts.
+
+Without a database the engine falls back to process-local books, which is correct
+for the single-process deployment the compose file runs. The two optional ports
+are checked for at startup and logged, so "persistence is off" is a fact an
+operator can see rather than infer from behaviour.
+
 ## What this server deliberately does not do yet
 
 - **Multi-gateway aggregation.** A frame heard by two gateways is deduplicated
@@ -166,13 +205,14 @@ growing `dropped` is the signal that a receiver is too slow.
   frame arrived in, so every uplink is treated as RX1. That is safe because the
   engine answers in both windows, but an RX2-only repeat is scheduled as if it
   were a first transmission.
-- **Duty-cycle accounting does not survive a restart.** Enforcement is live —
-  every planned downlink is filtered through `enforceDutyCycle` before it is
-  scheduled, and a window the band cannot afford is dropped with an event rather
-  than transmitted — but the ledger is in memory. A restart forgets the last
-  window's occupancy, and two `ns` processes sharing a gateway would each keep
-  their own books. Both need the ledger persisted or shared before a
-  multi-instance deployment is honest about compliance.
+- **Duty-cycle accounting is durable but not yet contention-aware.** Enforcement
+  is live, and the ledger now survives a restart: every booking is written to
+  `ns_airtime` and read back at startup, so a server that comes back up cannot
+  transmit straight through an allowance it had already spent. What it does not
+  do is *reserve* ahead of time across processes — two instances can each decide
+  a slot is affordable and both transmit, because the booking is written on a
+  timer rather than at the moment of decision. The window is the exposure: see
+  `NS_LEDGER_FLUSH_INTERVAL`.
 - **NewChannelReq on US915.** Its RX1-to-downlink-channel mapping is derived
   from the channel index, so an arbitrary user channel needs downlink-side work
   the server does not have; the request is refused rather than scheduled wrong.
