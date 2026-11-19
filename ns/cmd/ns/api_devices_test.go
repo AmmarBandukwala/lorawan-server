@@ -404,3 +404,219 @@ func TestCreateRejectsMalformedCredentials(t *testing.T) {
 		}
 	}
 }
+
+// TestPatchDeviceRenamesWithoutCredentials is the reason PATCH exists: PUT is a
+// replace that demands credentials, and this API never returns them, so without
+// PATCH a client cannot rename a device it provisioned.
+func TestPatchDeviceRenamesWithoutCredentials(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"name":"Renamed boiler","group":"Boiler room"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var view deviceView
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode the response: %v", err)
+	}
+	if view.Name != "Renamed boiler" || view.Group != "Boiler room" {
+		t.Errorf("view = %+v, want the new name and group", view)
+	}
+	if !view.Enabled {
+		t.Error("omitting enabled must leave the device enabled")
+	}
+
+	// The credentials survived the round trip. Losing the AppKey here would
+	// store a device that can never join again, and the failure would surface
+	// weeks later as a device that simply stops appearing.
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.AppKey == (lorawan.AES128Key{}) {
+		t.Error("the patch wiped the AppKey; the device can no longer join")
+	}
+	if stored.JoinEUI != mustEUI(t, "0102030405060708") {
+		t.Errorf("JoinEUI = %s, want it carried over unchanged", stored.JoinEUI)
+	}
+}
+
+// TestPatchResponseCarriesNoKeys repeats the provisioning endpoint's security
+// rule on the endpoint an operator uses daily.
+func TestPatchResponseCarriesNoKeys(t *testing.T) {
+	srv, _ := newTestAPI(t)
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken, `{"name":"x"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	got := rec.Body.String()
+	if strings.Contains(strings.ToLower(got), testAppKeyStr) {
+		t.Errorf("the response leaks the AppKey: %s", got)
+	}
+	for _, forbidden := range []string{"app_key", "nwk_s_key", "app_s_key"} {
+		if strings.Contains(got, `"`+forbidden+`"`) {
+			t.Errorf("the response carries a key field %q: %s", forbidden, got)
+		}
+	}
+}
+
+// TestPatchLeavesAbsentFieldsAlone is the pointer-fields contract: a request
+// that changes only the name must not silently re-enable ADR or drop the device
+// to class A.
+func TestPatchLeavesAbsentFieldsAlone(t *testing.T) {
+	srv, store := newTestAPI(t)
+	ctx := t.Context()
+	eui := mustEUI(t, testDevEUIStr)
+
+	dev, err := store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	dev.DisableADR = true
+	dev.SupportsClassC = true
+	dev.MaxDataRate = 3
+	if err := store.SaveDevice(ctx, dev); err != nil {
+		t.Fatalf("SaveDevice: %v", err)
+	}
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken, `{"name":"only the name"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if !stored.DisableADR {
+		t.Error("omitting disable_adr must not enable ADR")
+	}
+	if !stored.SupportsClassC {
+		t.Error("omitting supports_class_c must not demote the device to class A")
+	}
+	if stored.MaxDataRate != 3 {
+		t.Errorf("MaxDataRate = %d, want the stored 3", stored.MaxDataRate)
+	}
+	if stored.Name != "only the name" {
+		t.Errorf("Name = %q, want the new name", stored.Name)
+	}
+}
+
+func TestPatchDeviceToggles(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	// Disabling is how a staged rollout is held back: the device stays
+	// provisioned but the engine refuses it.
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"enabled":false,"disable_adr":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Enabled {
+		t.Error("enabled:false was not applied")
+	}
+	if !stored.DisableADR {
+		t.Error("disable_adr:true was not applied")
+	}
+}
+
+func TestPatchDeviceRejectsBadValues(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	cases := map[string]string{
+		"data rate above the band": `{"max_data_rate":16}`,
+		"negative data rate":       `{"min_data_rate":-2}`,
+		"tx power above the band":  `{"max_tx_power":99}`,
+		"min above max":            `{"min_data_rate":6,"max_data_rate":3}`,
+		"unknown field":            `{"name":"ok","app_key":"` + testAppKeyStr + `"}`,
+		"trailing JSON":            `{"name":"ok"} {"name":"again"}`,
+	}
+	for label, body := range cases {
+		rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400: %s", label, rec.Code, rec.Body.String())
+		}
+	}
+
+	// A rejected request must not have half-applied anything.
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Name != "" || stored.MaxDataRate != engine.UseRegionDefault ||
+		stored.MinDataRate != engine.UseRegionDefault || stored.MaxTxPower != engine.UseRegionDefault {
+		t.Errorf("a rejected patch changed the device: %+v", stored)
+	}
+	// In particular, the "unknown field" request must not have written the key
+	// it tried to smuggle in, nor wiped the one on file.
+	if stored.AppKey == (lorawan.AES128Key{}) {
+		t.Error("the rejected patch wiped the AppKey")
+	}
+}
+
+// TestPatchDeviceAcceptsRegionDefault pins -1 as the way to lift a limit. A
+// console needs to say "no restriction" explicitly, and 0 would mean DR0.
+func TestPatchDeviceAcceptsRegionDefault(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"max_data_rate":3}`); rec.Code != http.StatusOK {
+		t.Fatalf("setting a limit: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"max_data_rate":-1}`); rec.Code != http.StatusOK {
+		t.Fatalf("lifting the limit: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.MaxDataRate != engine.UseRegionDefault {
+		t.Errorf("MaxDataRate = %d, want UseRegionDefault (%d)", stored.MaxDataRate, engine.UseRegionDefault)
+	}
+}
+
+func TestPatchUnknownDeviceIsNotFound(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/ffffffffffffffff", testToken, `{"name":"ghost"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPatchRequiresTheToken(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, "", `{"name":"nope"}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+}
+
+// TestDeleteUnknownDeviceIsNotFound covers an EUI that was never provisioned,
+// which the existing delete test does not: it deletes a device that existed.
+func TestDeleteUnknownDeviceIsNotFound(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	rec := do(srv, http.MethodDelete, "/api/v1/devices/ffffffffffffffff", testToken, "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeleteRequiresTheToken(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	rec := do(srv, http.MethodDelete, "/api/v1/devices/"+testDevEUIStr, "", "")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", rec.Code)
+	}
+	// Refusing on auth must not have deleted anything.
+	if _, err := srv.devices.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr)); err != nil {
+		t.Errorf("an unauthorised delete removed the device: %v", err)
+	}
+}

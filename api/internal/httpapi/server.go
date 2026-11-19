@@ -50,10 +50,14 @@ type ProvisionedDevice struct {
 type Server struct {
 	repository  Repository
 	provisioner Provisioner
+	controller  Controller
 }
 
-func New(repository Repository, provisioner Provisioner) *Server {
-	return &Server{repository: repository, provisioner: provisioner}
+// New builds the console API. provisioner and controller may be nil, which means
+// the console is running without a network server: reads still work and the
+// endpoints that need one answer 503 instead of inventing a success.
+func New(repository Repository, provisioner Provisioner, controller Controller) *Server {
+	return &Server{repository: repository, provisioner: provisioner, controller: controller}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -66,6 +70,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/events", s.listEvents)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/v1/settings", s.updateSettings)
+
+	// Control plane. These make a device transmit, so they are grouped and
+	// commented as such: a read endpoint returning an error is a broken
+	// dashboard, and a write endpoint returning an error is a device that did not
+	// get its frame.
+	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/downlink", s.enqueueDownlink)
+	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}/downlink", s.cancelDownlink)
+	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/devstatus", s.requestDeviceStatus)
+	mux.HandleFunc("GET /api/v1/devices/{dev_eui}/session", s.getSession)
+	mux.HandleFunc("GET /api/v1/devices/{dev_eui}", s.getDevice)
+	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", s.updateDevice)
+	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", s.deleteDevice)
+	mux.HandleFunc("GET /api/v1/status", s.getStatus)
 	return withSecurityHeaders(mux)
 }
 

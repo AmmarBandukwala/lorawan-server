@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 )
@@ -16,14 +18,25 @@ var (
 	_ engine.Recorder    = (*Store)(nil)
 )
 
-// RecordUplink stores an accepted uplink.
+// RecordUplink stores an accepted uplink and every gateway that heard it.
 //
 // The engine also records *retransmissions* — a device that did not hear our
 // answer repeats the same counter — so the natural key legitimately repeats.
 // The existing row is refreshed and its retransmission tally bumped instead of
 // the insert being rejected.
+//
+// Both writes are one transaction. A reception set without its uplink, or the
+// reverse, would leave the coverage table disagreeing with the traffic table, and
+// the disagreement would be invisible until someone trusted the wrong one.
 func (s *Store) RecordUplink(ctx context.Context, r engine.UplinkRecord) error {
-	_, err := s.pool.Exec(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("pgstore: begin uplink: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var uplinkID int64
+	err = tx.QueryRow(ctx, `
 		INSERT INTO ns_uplinks (
 			received_at, dev_eui, dev_addr, key_epoch, f_cnt_up, f_port,
 			frm_payload, raw_phy_payload, gateway_id, frequency_hz,
@@ -40,7 +53,8 @@ func (s *Store) RecordUplink(ctx context.Context, r engine.UplinkRecord) error {
 			snr             = EXCLUDED.snr,
 			confirmed       = EXCLUDED.confirmed,
 			retransmission  = TRUE,
-			retransmissions = ns_uplinks.retransmissions + 1`,
+			retransmissions = ns_uplinks.retransmissions + 1
+		RETURNING uplink_id`,
 		r.At,
 		euiText(r.DevEUI),
 		devAddrText(r.DevAddr),
@@ -56,9 +70,52 @@ func (s *Store) RecordUplink(ctx context.Context, r engine.UplinkRecord) error {
 		float32(r.SNR),
 		r.Confirmed,
 		r.Retransmission,
-	)
+	).Scan(&uplinkID)
 	if err != nil {
 		return fmt.Errorf("pgstore: record uplink: %w", err)
+	}
+
+	if err := recordReceptions(ctx, tx, uplinkID, r); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// recordReceptions writes one row per gateway that heard the frame.
+//
+// Re-running it for the same uplink is safe: the key is (uplink, gateway) and the
+// measurement is refreshed rather than duplicated, so a retransmission heard by a
+// different set of gateways ends up with an accurate picture instead of a
+// accumulation of stale ones.
+func recordReceptions(ctx context.Context, tx pgx.Tx, uplinkID int64, r engine.UplinkRecord) error {
+	for i, rec := range r.Receptions {
+		// The engine puts the chosen copy first; anything else that marks a
+		// reception as chosen is honoured too, so the flag cannot silently go
+		// missing if the ordering convention changes.
+		chosen := i == 0
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO ns_uplink_gateways (
+				uplink_id, gateway_id, frequency_hz, data_rate_index,
+				rssi, snr, received_at, chosen
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (uplink_id, gateway_id) DO UPDATE SET
+				frequency_hz    = EXCLUDED.frequency_hz,
+				data_rate_index = EXCLUDED.data_rate_index,
+				rssi            = EXCLUDED.rssi,
+				snr             = EXCLUDED.snr,
+				received_at     = EXCLUDED.received_at,
+				chosen          = EXCLUDED.chosen`,
+			uplinkID,
+			euiText(rec.GatewayID),
+			int64(rec.FrequencyHz),
+			rec.DataRateIndex,
+			float32(rec.RSSI),
+			float32(rec.SNR),
+			rec.ReceivedAt,
+			chosen,
+		); err != nil {
+			return fmt.Errorf("pgstore: record uplink reception for %s: %w", rec.GatewayID, err)
+		}
 	}
 	return nil
 }

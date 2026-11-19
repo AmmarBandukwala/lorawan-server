@@ -45,7 +45,8 @@ to settle it.
 | `cmd/ns` (api) | Authenticated application API: downlink queue, session read, DevStatus | M5 ✅ |
 | `internal/region` (toa, subband) | Time on air for LoRa and FSK; EU868 sub-band table with per-sub-band duty cycle | M6 ✅ |
 | `internal/engine` (dutycycle) | Transmit ledger: accounts for ToA before scheduling, defers a frame that would breach the limit | M6 ✅ |
-| `cmd/ns` (device API) | Device provisioning: list/get/create/update/delete, keys never returned | M6 ✅ |
+| `cmd/ns` (device API) | Device provisioning: list/get/create/replace/patch/delete, keys never returned | M6 ✅ |
+| `api` + Fieldnode UI | Device management in the console: read settings, patch them, revoke; relayed to the ns, which owns the row | M6 ✅ |
 
 ## Milestones
 
@@ -92,9 +93,22 @@ to settle it.
    checklist. Neither is possible without hardware, so this milestone is not
    closed and should not be described as such.
 
-7. **Still open after M6:** device/key/profile management in the Fieldnode UI
-   and pointing the Fieldnode API at the `ns_*` tables, so the dashboard reads
-   live traffic instead of its own empty inventory.
+7. **M7 — what is genuinely left:**
+   *Console and API:* device management now runs end to end through the console,
+   and the dashboard reads the `ns_*` tables rather than its own empty inventory.
+   *Still open, in rough order of consequence:*
+   * **Class C is stored but not implemented.** `supports_class_c` is persisted,
+     editable and reported, and the engine never reads it. The console says so on
+     the toggle rather than implying a device became reachable.
+   * **One transport only.** Semtech UDP is implemented; Basic Station/LWS is not,
+     so an LTE-backed gateway that speaks only that cannot be used.
+   * **Three regions.** EU868, US915 and AS923 (with its JS1/JS2 offsets).
+     AU915, CN470, IN865, RU864 and KR920 need tables, tests and duty-cycle rules.
+   * **ADR steps only through 125 kHz LoRa rates**, deliberately: an FSK or
+     500 kHz rate is a jump of far more than the 3 dB the algorithm reasons in.
+   * **No key rotation and no device-profile objects** beyond the per-device
+     fields, so a fleet-wide change is a loop over devices.
+   * **The bench pass and conformance checklist**, which need hardware.
 
 ## Downlink lifecycle
 
@@ -144,6 +158,38 @@ traces. Statuses are meant to be acted on: 404 means the device is not
 provisioned or has not joined, 409 means one frame is already queued, 400 means
 the request itself is wrong. The session endpoint reports data rates, counters
 and battery — never session keys.
+
+### Editing a device without its keys
+
+`PUT /api/v1/devices/{dev_eui}` is a replace, so it demands credentials again.
+Since no response ever carries keys, a client that follows that rule could load a
+device, change its name, and then be unable to save it. `PATCH` closes the loop:
+it takes only operator-facing fields, and the read-modify-write happens inside
+the process, so the keys are read from the store and written back untouched.
+
+```sh
+# Rename and stop the network from steering this device's data rate.
+curl -s -X PATCH localhost:8091/api/v1/devices/0011223344556677 \
+  -H "Authorization: Bearer $NS_API_TOKEN" \
+  -d '{"name": "Boiler 3", "disable_adr": true}'
+
+# Lift a data-rate limit. -1 means "whatever the band allows"; 0 would mean DR0.
+curl -s -X PATCH localhost:8091/api/v1/devices/0011223344556677 \
+  -H "Authorization: Bearer $NS_API_TOKEN" -d '{"max_data_rate": -1}'
+```
+
+Every field is optional and **omitted means leave alone** — that is the whole
+contract, and a client that posts the fields it did not change will quietly
+re-enable ADR on a device whose name was the only thing edited. The join-nonce
+counter and the DevNonce replay log survive a patch for the same reason
+`PUT` carries them over: they are replay protection, not operator input, and
+resetting them would let a captured join-accept from months ago become valid
+again.
+
+`DELETE` removes the device **and its session**. That is the point: revoking a
+device has to stop it talking, and a surviving session would let it keep
+exchanging frames with keys the operator just withdrew. To pause rather than
+remove, patch `enabled` to `false` instead.
 
 Webhooks POST one JSON object per event to each `NS_WEBHOOK_URLS` entry with
 `Authorization: Bearer $NS_WEBHOOK_TOKEN`. Server-side failures are retried with

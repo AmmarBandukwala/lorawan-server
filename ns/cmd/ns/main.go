@@ -77,6 +77,9 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	engCfg.DeviceStatusEvery = cfg.deviceStatusEvery
 	engCfg.DisableDutyCycleEnforcement = cfg.disableDutyCycle
 	engCfg.DutyCycleWindow = cfg.dutyCycleWindow
+	if cfg.aggregationDelay >= 0 {
+		engCfg.AggregationDelay = cfg.aggregationDelay
+	}
 
 	store, gatewayStore, closeStore, err := openStore(ctx, log, cfg.databaseURL)
 	if err != nil {

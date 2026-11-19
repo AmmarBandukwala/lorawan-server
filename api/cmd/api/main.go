@@ -39,12 +39,19 @@ func main() {
 		log.Fatalf("apply database migrations: %v", err)
 	}
 
-	// Provisioning is optional in the sense that the dashboard is still useful
-	// without it — the fleet, traffic and health all keep working — but it must
-	// never fail silently, hence the warning rather than a quiet nil.
+	// Provisioning and the control plane are optional in the sense that the
+	// dashboard is still useful without them — the fleet, traffic and health all
+	// keep working — but neither may fail silently, hence the warning and the
+	// fatal on a half-configured client rather than a quiet nil.
 	var provisioner httpapi.Provisioner
+	var controller httpapi.Controller
 	if nsAPI := os.Getenv("NS_API_URL"); nsAPI != "" {
-		client, err := nsclient.New(nsAPI, os.Getenv("NS_API_TOKEN"))
+		client, err := nsclient.New(nsAPI, os.Getenv("NS_API_TOKEN"),
+			// The network server serves its read-only health endpoint on its own
+			// port; without this the console would ask the token-protected API
+			// port for a route that is not served there.
+			nsclient.WithStatusURL(os.Getenv("NS_STATUS_URL")),
+		)
 		if err != nil {
 			// A half-configured integration is a misconfiguration worth dying
 			// over: starting anyway would leave an operator clicking a Register
@@ -52,16 +59,19 @@ func main() {
 			log.Fatalf("network server API: %v", err)
 		}
 		provisioner = httpapi.NewNSProvisioner(client)
-		log.Printf("provisioning through the network server at %s", nsAPI)
+		// The same client serves both: it already holds the base URL and token,
+		// and its control methods match the Controller port exactly.
+		controller = client
+		log.Printf("provisioning and downlinks through the network server at %s", nsAPI)
 	} else {
-		log.Print("NS_API_URL is not set: device registration will answer 503")
+		log.Print("NS_API_URL is not set: device registration and downlinks will answer 503")
 	}
 
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {
 		address = ":8080"
 	}
-	app := httpapi.New(postgres.New(pool), provisioner)
+	app := httpapi.New(postgres.New(pool), provisioner, controller)
 	server := &http.Server{
 		Addr:              address,
 		Handler:           app.Handler(),

@@ -29,6 +29,16 @@ type Config struct {
 	// DedupWindow bounds the multi-gateway de-duplication memory. Zero means
 	// DefaultDedupWindow.
 	DedupWindow time.Duration
+	// AggregationDelay is how long the server waits, after the first copy of a
+	// frame, for the copies other gateways heard. Zero disables aggregation and
+	// answers the first copy, discarding the rest.
+	//
+	// It is paid on every uplink, and it must stay well short of the RX1 delay
+	// (one second by default) because the window has to close in time for the
+	// downlink to be dispatched before the device's window opens. Negative is
+	// treated as zero. Zero means "no window", not DefaultAggregationDelay, so
+	// an operator can turn the feature off; DefaultConfig opts in.
+	AggregationDelay time.Duration
 	// DownlinkPowerdBm is the TX power handed to the gateway; the transport
 	// clamps it to its own and the band's limits.
 	DownlinkPowerdBm int8
@@ -79,6 +89,7 @@ func DefaultConfig() Config {
 		Region:                "EU868",
 		MaxFCntDelta:          DefaultMaxFCntDelta,
 		DedupWindow:           DefaultDedupWindow,
+		AggregationDelay:      DefaultAggregationDelay,
 		DownlinkPowerdBm:      14,
 		ADRInstallationMargin: DefaultADRInstallationMargin,
 		ADRACKLimit:           DefaultADRACKLimit,
@@ -99,6 +110,9 @@ type Engine struct {
 	mu      sync.Mutex
 	regions map[string]region.Region
 	seen    map[string]time.Time
+	// collecting holds the copies of frames whose aggregation window is still
+	// open, keyed by the same dedup key the claim book uses.
+	collecting map[string]*collection
 	// budget tracks channel occupancy per gateway and sub-band so our own
 	// transmissions stay inside the band's duty cycle and dwell time.
 	budget *airtimeBudget
@@ -140,6 +154,12 @@ func New(cfg Config, store Store, gw gateway.Gateway, opts ...Option) (*Engine, 
 	if cfg.DedupWindow <= 0 {
 		cfg.DedupWindow = DefaultDedupWindow
 	}
+	// Negative is clamped to zero rather than defaulted: zero is the operator's
+	// way of saying "do not wait", and silently turning that back into 200 ms
+	// would ignore the only setting that disables the feature.
+	if cfg.AggregationDelay < 0 {
+		cfg.AggregationDelay = 0
+	}
 	// Zero means "unset" for the ADR knobs, so a Config literal built field by
 	// field still gets sane behaviour. A deliberately zero installation margin
 	// is expressed with a small positive number; 0 dB of fade margin is not a
@@ -161,13 +181,14 @@ func New(cfg Config, store Store, gw gateway.Gateway, opts ...Option) (*Engine, 
 	}
 
 	e := &Engine{
-		cfg:     cfg,
-		store:   store,
-		gw:      gw,
-		log:     slog.Default(),
-		regions: map[string]region.Region{},
-		seen:    map[string]time.Time{},
-		nowFn:   time.Now,
+		cfg:        cfg,
+		store:      store,
+		gw:         gw,
+		log:        slog.Default(),
+		regions:    map[string]region.Region{},
+		seen:       map[string]time.Time{},
+		collecting: map[string]*collection{},
+		nowFn:      time.Now,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -188,6 +209,17 @@ func New(cfg Config, store Store, gw gateway.Gateway, opts ...Option) (*Engine, 
 	}
 	e.defaultRegion = r
 	e.regions[r.CommonName()] = r
+
+	// The aggregation window has to close in time for the downlink to be
+	// dispatched before the device stops listening, so it cannot reach the RX1
+	// delay. A window that does is a configuration mistake that would cost every
+	// single-window downlink in the deployment, so it is refused at construction
+	// rather than surfacing as a field report about devices that never get an
+	// answer.
+	if cfg.AggregationDelay >= r.Defaults().RX1Delay {
+		return nil, fmt.Errorf("engine: AggregationDelay of %v must stay below the %s RX1 delay of %v",
+			cfg.AggregationDelay, r.CommonName(), r.Defaults().RX1Delay)
+	}
 	return e, nil
 }
 

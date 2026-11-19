@@ -73,6 +73,56 @@ type UplinkFrame struct {
 	SNR        float64
 	// ReceivedAt is when the gateway received the frame (wall clock).
 	ReceivedAt time.Time
+
+	// Receptions holds every gateway copy of this frame, the chosen one first.
+	// A frame that reaches two gateways arrives twice at the server, and the
+	// second copy is information rather than noise: it says the device is
+	// reachable from two directions, and its SNR may be the better one.
+	//
+	// The top-level fields above always describe the *chosen* reception — the
+	// copy the downlink will go back through — so code that ignores Receptions
+	// keeps working and simply does not benefit from the merge.
+	Receptions []Reception
+}
+
+// Reception is one gateway's copy of the same radio frame.
+//
+// Frequency, data rate and window are repeated here rather than trusted from
+// the frame because a forwarder can report a different arrival channel per
+// gateway, and because the downlink for a chosen reception has to be planned
+// from what that gateway actually heard.
+type Reception struct {
+	GatewayID lorawan.EUI64
+	// UplinkID is the transport token of *this* copy. It has to travel with the
+	// reception: the downlink timestamp is derived from the concentrator
+	// timestamp of whichever copy the downlink is anchored to, and using
+	// another gateway's token would place the transmission at the wrong moment.
+	UplinkID      [8]byte
+	FrequencyHz   uint32
+	DataRateIndex int
+	RxWindow      RxWindow
+	RSSI          float64
+	SNR           float64
+	ReceivedAt    time.Time
+}
+
+// AllReceptions returns every copy of the frame, synthesising a single-element
+// list when a transport has not populated Receptions. It keeps the aggregation
+// logic from having to special-case a frame that arrived before it existed.
+func (f UplinkFrame) AllReceptions() []Reception {
+	if len(f.Receptions) > 0 {
+		return f.Receptions
+	}
+	return []Reception{{
+		GatewayID:     f.GatewayID,
+		UplinkID:      f.UplinkID,
+		FrequencyHz:   f.FrequencyHz,
+		DataRateIndex: f.DataRateIndex,
+		RxWindow:      f.RxWindow,
+		RSSI:          f.RSSI,
+		SNR:           f.SNR,
+		ReceivedAt:    f.ReceivedAt,
+	}}
 }
 
 // DownlinkFrame is one downlink transmission the engine asks a gateway to

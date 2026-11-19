@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/region"
 )
@@ -335,6 +336,41 @@ type UplinkRecord struct {
 	// counter is stored in AFCntDown. Integrations report it so a consumer can
 	// learn that a confirmed downlink landed without polling the session.
 	ACK bool
+
+	// Receptions holds every gateway that heard this frame, the chosen one
+	// first. Coverage is a property of the network rather than of the one
+	// gateway that happened to win, and it is the only evidence a deployment has
+	// of where a device is actually reachable from.
+	Receptions []UplinkReception
+}
+
+// UplinkReception is one gateway's record of hearing a frame. It carries the
+// measurement, not the transport timing token, which is meaningless once the
+// frame has been answered.
+type UplinkReception struct {
+	GatewayID     lorawan.EUI64
+	FrequencyHz   uint32
+	DataRateIndex int
+	RSSI          float64
+	SNR           float64
+	ReceivedAt    time.Time
+}
+
+// uplinkReceptions projects the transport's receptions onto the storage shape.
+func uplinkReceptions(frame gateway.UplinkFrame) []UplinkReception {
+	receptions := frame.AllReceptions()
+	out := make([]UplinkReception, 0, len(receptions))
+	for _, r := range receptions {
+		out = append(out, UplinkReception{
+			GatewayID:     r.GatewayID,
+			FrequencyHz:   r.FrequencyHz,
+			DataRateIndex: r.DataRateIndex,
+			RSSI:          r.RSSI,
+			SNR:           r.SNR,
+			ReceivedAt:    r.ReceivedAt,
+		})
+	}
+	return out
 }
 
 // DownlinkRecord is a scheduled downlink as handed to storage.

@@ -229,7 +229,23 @@ func (e *Engine) scheduleDownlink(ctx context.Context, frame gateway.UplinkFrame
 		// The callback runs after HandleUplink has returned, so it must not
 		// inherit the caller's cancellation.
 		sendCtx := context.WithoutCancel(ctx)
-		e.scheduleFn(plan.Delay, func() {
+
+		// plan.Delay is measured from the uplink, and time has gone by since:
+		// the aggregation window, plus however long the store took. Scheduling
+		// the full delay from now would push every downlink that much later, and
+		// past the point where the device has closed its window the frame is
+		// simply lost. The transport's concentrator timestamp is absolute, so a
+		// dispatch that is merely late still lands correctly; one that is too
+		// late does not, and says so through TX_ACK.
+		dispatchIn := e.remainingSlack(frame, plan.Delay)
+		if dispatchIn < 0 {
+			e.log.Warn("the receive window is already due; dispatching immediately",
+				"gateway", frame.GatewayID, "window", plan.Window,
+				"overdue_by", -dispatchIn)
+			dispatchIn = 0
+		}
+
+		e.scheduleFn(dispatchIn, func() {
 			if err := e.gw.SendDownlink(sendCtx, df); err != nil {
 				e.log.Error("send downlink failed",
 					"gateway", df.GatewayID, "window", df.Window, "err", err)

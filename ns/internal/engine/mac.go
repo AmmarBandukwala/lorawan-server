@@ -18,8 +18,11 @@ var ErrPendingDownlinkExists = errors.New("engine: device already has a pending 
 // processMACCommands runs the uplink MAC commands the device sent and returns
 // the answers to carry back. Unknown or unimplemented commands are answered
 // conservatively rather than ignored, because a device blocks on some answers.
+//
+// gwCnt is how many gateways received the uplink the commands arrived in, which
+// LinkCheckAns reports back to the device.
 func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Session,
-	cmds lorawan.MACCommandSet, reg region.Region) (lorawan.MACCommandSet, error) {
+	cmds lorawan.MACCommandSet, reg region.Region, gwCnt int) (lorawan.MACCommandSet, error) {
 
 	var replies lorawan.MACCommandSet
 
@@ -131,13 +134,23 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 			}
 
 		case lorawan.CIDLinkCheck: // uplink: LinkCheckReq
-			// Margin is reported as the last measured SNR rounded to dB. A
-			// proper demodulation-floor model (per SF/BW sensitivity) lands in
-			// M4 with ADR; until then this is an honest approximation.
-			margin := int8(roundSNR(ses.LastSNR))
+			// Margin is the headroom above the demodulation floor of the data
+			// rate the device is using, in dB, and GwCnt is how many gateways
+			// heard it. Both come from the aggregated copies: a device that two
+			// gateways can hear has a better network than one that reports a
+			// single gateway, and its margin should reflect the best of the two
+			// links rather than whichever packet arrived first.
+			margin := int8(roundSNR(ses.LastSNR - requiredSNRForDataRate(reg, ses.DataRate)))
+			if margin < 0 {
+				margin = 0 // the field is unsigned in spirit; a negative margin
+				// means "at the edge", which 0 already tells the device.
+			}
+			if gwCnt < 1 {
+				gwCnt = 1
+			}
 			replies = append(replies, lorawan.MACCommand{
 				CID:     lorawan.CIDLinkCheck,
-				Payload: lorawan.LinkCheckAnsPayload{Margin: margin, GwCnt: 1}.Marshal(),
+				Payload: lorawan.LinkCheckAnsPayload{Margin: margin, GwCnt: byte(gwCnt)}.Marshal(),
 			})
 
 		case lorawan.CIDNewChannel: // uplink: NewChannelAns

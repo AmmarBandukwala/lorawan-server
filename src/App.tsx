@@ -5,6 +5,8 @@ import {
 } from 'lucide-react'
 import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
+import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
+import { fetchStatus, type NetworkStatus } from './features/network/control'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
 import { REFRESH_INTERVAL_MS } from './features/network/constants'
 import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
@@ -33,6 +35,14 @@ function App() {
   const [settingsMessage, setSettingsMessage] = useState('')
   const [settingsSaving, setSettingsSaving] = useState(false)
 
+  // The device whose live session is open, and the network server's own health
+  // report. Neither comes from the snapshot: the session is per-device state the
+  // list endpoint does not carry, and the health report is process state — which
+  // gateways are still sending PULL_DATA, how many webhook deliveries were
+  // dropped — that no table holds.
+  const [selected, setSelected] = useState<Device | null>(null)
+  const [status, setStatus] = useState<NetworkStatus | null>(null)
+
   // The newest snapshot, for merging a refresh into it. It is written only
   // where the snapshot changes — in the refresh and in patchSnapshot — so it
   // never needs syncing from state, and reading it does not depend on when
@@ -59,6 +69,13 @@ function App() {
       setSettingsDraft((draft) => (sameSettings(draft, previous.settings) ? next.settings : draft))
       setConnection(next.failed.length === 0 ? 'connected'
         : next.failed.length === sectionKeys.length ? 'offline' : 'degraded')
+
+      // Best-effort and deliberately outside the snapshot: the health report
+      // comes from the network server, and one that is not answering must not
+      // degrade the panels that did load. The badge in the gateways view says
+      // when it is missing.
+      const health = await fetchStatus().catch(() => null)
+      if (!controller.signal.aborted) setStatus(health)
     } catch {
       // Per-section failures are reported in the snapshot rather than thrown, so
       // reaching here means the refresh was superseded or the page went away.
@@ -201,8 +218,16 @@ function App() {
             <section className="bottom-grid"><article className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Latest network events</p></div><button className="text-action" onClick={() => setView('Events')}>All events <ArrowUpRight size={14} /></button></div><div className="activity-list">{events.slice(0, 3).map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></article><article className="panel downlink-panel"><div className="panel-heading"><div><h2>Downlink queue</h2><p>Scheduled device messages</p></div><ArrowDown size={16} className="muted-icon" /></div><div className="queue-empty"><div className="queue-icon"><Check size={18} /></div><b>{overview.queuedDownlinks === 0 ? 'Queue is clear' : `${overview.queuedDownlinks} messages queued`}</b><span>{overview.queuedDownlinks === 0 ? 'No pending downlinks' : 'Waiting for an eligible receive window'}</span></div><div className="queue-footer"><span>Last sent</span><b>{overview.lastDownlink} <span>·</span> {overview.sentDownlinks24h} in 24h</b></div></article></section>
           </>}
 
-          {view === 'Devices' && <section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} /><DeviceTable devices={filteredDevices} /></section>}
-          {view === 'Gateways' && <section className="gateway-grid-full">{gateways.map((gateway) => <GatewayCard key={gateway.id} gateway={gateway} />)}{gateways.length === 0 && <div className="panel empty-panel">No gateways registered. Gateway registration and Basic Station connectivity are not implemented yet.</div>}</section>}
+          {view === 'Devices' && <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refreshNetworkSnapshot()} onDeleted={() => { setSelected(null); void refreshNetworkSnapshot() }} />}</div>}
+          {view === 'Gateways' && <section className="gateway-grid-full">
+            {gateways.map((gateway) => <GatewayCard key={gateway.id} gateway={gateway} health={status?.gateways.find((g) => g.gateway_eui.toUpperCase() === gateway.id.toUpperCase())} />)}
+            {gateways.length === 0 && <div className="panel empty-panel">{status && status.gateways.length > 0
+              ? 'Gateways are on the air but not registered in the inventory yet.'
+              : 'No gateways have been heard from. Point a packet forwarder at this server’s UDP port and it will appear here.'}</div>}
+            {status?.duty_cycle && <DutyCyclePanel usage={status.duty_cycle.usage} window={status.duty_cycle.window} denials={status.duty_cycle.denials} />}
+            {status && status.integrations && <article className="panel integration-panel"><div className="panel-heading"><div><h2>Integrations</h2><p>{status.integrations.sinks.join(', ') || 'No sinks configured'}</p></div></div><div className="gateway-stats"><div><span>Delivered</span><b>{status.integrations.published.toLocaleString()}</b></div><div><span>Failed</span><b>{status.integrations.delivery_failures.toLocaleString()}</b></div><div><span>Dropped</span><b>{status.integrations.dropped.toLocaleString()}</b></div><div><span>In queue</span><b>{status.integrations.queued.toLocaleString()}</b></div></div>{status.integrations.dropped > 0 && <p className="form-error" role="alert">Events are being dropped: the queue is full, so a receiver is too slow or unreachable.</p>}</article>}
+            {!status && <div className="panel integration-panel"><b>No health report from the network server.</b><span> Gateway presence, duty-cycle occupancy and integration counters need the network server reachable.</span></div>}
+          </section>}
           {view === 'Events' && <section className="panel event-view"><div className="panel-heading"><div><h2>Network events</h2><p>Recent activity from your local network</p></div><span className="select-button">Most recent</span></div><div className="activity-list event-list">{events.map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></section>}
           {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} />}
 

@@ -26,3 +26,6 @@ certs/
 *.njsproj
 *.sln
 *.sw?
+
+# Throwaway Linux binaries built for container runs
+*-bin-tmp

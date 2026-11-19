@@ -88,7 +88,7 @@ func TestCreateDeviceProvisionsTheNetworkServer(t *testing.T) {
 	prov := &stubProvisioner{result: ProvisionedDevice{
 		DevEUI: "0011223344556677", Name: "Boiler sensor", Group: "Basement", Activation: "otaa",
 	}}
-	s := New(&stubRepository{}, prov)
+	s := New(&stubRepository{}, prov, nil)
 
 	rec := postDevice(t, s, validBody)
 	if rec.Code != http.StatusCreated {
@@ -128,7 +128,7 @@ func TestCreateDeviceProvisionsTheNetworkServer(t *testing.T) {
 // QR payload with separators and lower case.
 func TestCreateDeviceNormalizesFormatting(t *testing.T) {
 	prov := &stubProvisioner{result: ProvisionedDevice{DevEUI: "0011223344556677"}}
-	s := New(&stubRepository{}, prov)
+	s := New(&stubRepository{}, prov, nil)
 
 	rec := postDevice(t, s, `{"name":"x","devEui":"00-11-22-33-44-55-66-77",`+
 		`"appKey":"2b7e151628aed2a6abf7158809cf4f3c"}`)
@@ -174,7 +174,7 @@ func TestCreateDeviceRejectsInvalidInputBeforeProvisioning(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			prov := &stubProvisioner{}
-			rec := postDevice(t, New(&stubRepository{}, prov), tc.body)
+			rec := postDevice(t, New(&stubRepository{}, prov, nil), tc.body)
 			if rec.Code != tc.wantStatus {
 				t.Errorf("status = %d, want %d (%s)", rec.Code, tc.wantStatus, rec.Body)
 			}
@@ -192,7 +192,7 @@ func TestCreateDeviceRejectsInvalidInputBeforeProvisioning(t *testing.T) {
 // when it cannot reach a network server, but registration must say so rather
 // than write a row that does nothing.
 func TestCreateDeviceWithoutProvisioningConfigured(t *testing.T) {
-	rec := postDevice(t, New(&stubRepository{}, nil), validBody)
+	rec := postDevice(t, New(&stubRepository{}, nil, nil), validBody)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
 	}
@@ -213,7 +213,7 @@ func TestCreateDeviceMapsNetworkServerErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		prov := &stubProvisioner{err: tc.err}
-		rec := postDevice(t, New(&stubRepository{}, prov), validBody)
+		rec := postDevice(t, New(&stubRepository{}, prov, nil), validBody)
 		if rec.Code != tc.wantStatus {
 			t.Errorf("for %v: status = %d, want %d", tc.err, rec.Code, tc.wantStatus)
 		}
@@ -235,7 +235,7 @@ func TestListDevicesRendersHealth(t *testing.T) {
 	}}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	rec := httptest.NewRecorder()
-	New(repo, nil).Handler().ServeHTTP(rec, req)
+	New(repo, nil, nil).Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)

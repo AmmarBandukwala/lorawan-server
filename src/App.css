@@ -269,3 +269,77 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
   .page-footer > span:last-child { font-size: 0; }
   .page-footer > span:last-child .status-indicator { font-size: initial; }
 }
+
+/* Device console: the live session panel and its controls.
+ *
+ * Sized to sit beside the device table rather than over it, and the field grid
+ * uses the same 9/11px scale as the gateway cards so a panel of raw protocol
+ * values does not read as a different product. */
+.device-view { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 13px; align-items: start; margin-top: 20px; }
+.device-console { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+.console-loading, .console-empty, .console-queue-empty { color: #87928a; font-size: 10px; }
+.console-empty { display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1px dashed var(--line); border-radius: 8px; }
+.console-empty b { color: #556259; font-size: 11px; }
+.console-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.console-field span { display: block; color: #909a93; font-size: 9px; }
+.console-field b { display: flex; align-items: center; gap: 4px; margin-top: 4px; color: #4a564e; font-size: 10px; font-weight: 600; overflow-wrap: anywhere; }
+.console-queue { display: flex; flex-direction: column; gap: 7px; padding: 12px; border-radius: 8px; background: var(--canvas); }
+.console-queue > b { color: #556259; font-size: 10px; }
+.console-queue-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: #556259; font-size: 10px; }
+.console-queue-row code { padding: 2px 5px; border-radius: 4px; background: #fff; color: #3f4a43; font-family: var(--mono); font-size: 9px; }
+.console-composer { display: grid; grid-template-columns: 1fr 64px; gap: 9px; padding-top: 14px; border-top: 1px solid var(--line); }
+.console-composer label { display: flex; flex-direction: column; gap: 5px; color: #7d877f; font-size: 9px; }
+.console-composer input { padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font-family: var(--mono); font-size: 10px; }
+.console-composer .console-confirm { flex-direction: row; align-items: center; gap: 6px; align-self: end; font-size: 10px; }
+.console-composer .button { grid-column: 1 / -1; justify-content: center; }
+.console-composer .form-error, .console-composer .form-success, .device-console > .form-error, .device-console > .form-success { grid-column: 1 / -1; }
+.console-composer .text-action { grid-column: 1 / -1; justify-self: start; }
+
+/* Device settings: the edit form and revocation.
+ *
+ * The destructive action is styled apart from everything else on the panel and
+ * requires a second click, because revoking a device is the one console action
+ * that cannot be undone from the UI — the device has to be provisioned again with
+ * its keys, which means having the label or the original ticket to hand. */
+.console-settings { display: flex; flex-direction: column; gap: 14px; padding: 18px; margin-top: 13px; }
+.console-empty-note { color: #87928a; font-size: 10px; }
+.console-settings-grid { display: flex; flex-direction: column; gap: 11px; padding-top: 14px; border-top: 1px solid var(--line); }
+.console-settings-grid label { display: flex; flex-direction: column; gap: 5px; color: #7d877f; font-size: 9px; }
+.console-settings-grid input, .console-settings-grid select { padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font-size: 10px; }
+.console-toggles { display: flex; flex-direction: column; gap: 11px; }
+.console-toggle { display: grid; grid-template-columns: 16px 1fr; gap: 4px 8px; align-items: center; color: #7d877f; font-size: 9px; cursor: pointer; }
+.console-toggle input { width: 14px; height: 14px; margin: 0; accent-color: #28785b; }
+.console-toggle b { color: #4a564e; font-size: 10px; font-weight: 600; }
+.console-toggle span { grid-column: 2; color: #96a09a; font-size: 9px; line-height: 1.45; }
+.console-settings-actions .button { justify-content: center; }
+.console-revoke { padding-top: 14px; border-top: 1px solid var(--line); }
+.console-revoke-confirm { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid #e8c9c4; border-radius: 8px; background: #fdf4f3; }
+.console-revoke-confirm b { color: #8f3b31; font-size: 11px; }
+.console-revoke-confirm span { color: #7b5a55; font-size: 9px; line-height: 1.5; }
+.console-revoke-confirm > div { display: flex; align-items: center; gap: 10px; }
+.button-danger { background: #a8483c; color: #fff; }
+.button-danger:hover { background: #93402f; }
+.text-action.danger { color: #a8483c; }
+.text-action.danger:hover { color: #8f3b31; }
+
+/* Gateway health, from the network server's own report. */
+.gateway-health { display: grid; grid-template-columns: 1fr 1fr; gap: 11px 8px; margin-top: 14px; padding: 14px; border-radius: 8px; background: var(--canvas); }
+.gateway-health span { display: block; color: #909a93; font-size: 9px; }
+.gateway-health b { display: block; margin-top: 4px; color: #4a564e; font-size: 10px; font-weight: 600; }
+.text-warning { color: #a34e43; }
+.gateway-card .form-error { margin-top: 10px; }
+.row-selectable { cursor: pointer; }
+.row-selectable:hover td { background: var(--green-soft); }
+
+/* Duty-cycle and integration readouts. */
+.duty-panel, .integration-panel { grid-column: 1 / -1; padding: 18px; }
+.duty-list { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.duty-row { display: grid; grid-template-columns: 150px 70px 60px 1fr; gap: 10px; align-items: center; color: #556259; font-size: 10px; }
+.duty-row code { font-family: var(--mono); font-size: 9px; }
+.integration-panel .gateway-stats { margin-top: 14px; }
+
+@media (max-width: 1180px) {
+  .device-view { grid-template-columns: 1fr; }
+  .device-console { position: static; }
+}
+

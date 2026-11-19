@@ -128,6 +128,31 @@ type Env struct {
 	Store  *engine.MemStore
 	GW     *Gateway
 	Clock  *Clock
+	// sched is set by NewDeferred. When present, the helpers that a test expects
+	// to have completed synchronously run the pending work themselves, so a test
+	// only has to think about the scheduler when it is studying the scheduler.
+	sched *DeferredScheduler
+}
+
+// Settle runs anything the deferred scheduler is holding, including work that
+// those callbacks schedule in turn, until the queue is empty.
+//
+// Draining rather than running one round matters because a real uplink is a
+// chain: closing the aggregation window processes the frame, and processing the
+// frame schedules the downlink. One round would leave the answer unsent and the
+// test would be asserting that the engine does nothing.
+func (env *Env) Settle() {
+	if env.sched == nil {
+		return
+	}
+	// Bounded so a callback that schedules itself forever fails the test instead
+	// of hanging it.
+	for round := 0; round < 64; round++ {
+		if env.sched.Run() == 0 {
+			return
+		}
+	}
+	env.t.Fatal("scheduled work never settled; a callback is scheduling itself forever")
 }
 
 // New builds an engine with the default configuration, EU868 and a fixed clock.
@@ -177,6 +202,7 @@ func (env *Env) Join() (*sim.Device, []gateway.DownlinkFrame) {
 		UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5)); err != nil {
 		env.t.Fatalf("HandleUplink(join): %v", err)
 	}
+	env.Settle()
 
 	frames := env.GW.Frames()
 	if len(frames) == 0 {
@@ -200,14 +226,17 @@ func (env *Env) Uplink(simDev *sim.Device, o sim.UplinkOptions, window gateway.R
 		UplinkFrame(wire, window, EU868Ch0Hz, EU868DR5)); err != nil {
 		env.t.Fatalf("HandleUplink: %v", err)
 	}
+	env.Settle()
 }
 
 // UplinkWire feeds raw bytes, for frames a well-behaved device would not build:
 // replays, a foreign DevAddr, a corrupted MIC.
 func (env *Env) UplinkWire(wire []byte) error {
 	env.t.Helper()
-	return env.Engine.HandleUplink(context.Background(),
+	err := env.Engine.HandleUplink(context.Background(),
 		UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5))
+	env.Settle()
+	return err
 }
 
 // Session reads back a device's session.
@@ -236,6 +265,7 @@ func (env *Env) UplinkSNR(simDev *sim.Device, o sim.UplinkOptions, snr float64) 
 	if err := env.Engine.HandleUplink(context.Background(), f); err != nil {
 		env.t.Fatalf("HandleUplink: %v", err)
 	}
+	env.Settle()
 }
 
 // UplinkFrame wraps radio bytes in the metadata a gateway would report.
@@ -250,6 +280,51 @@ func UplinkFrame(wire []byte, window gateway.RxWindow, freqHz uint32, dr int) ga
 		PHYPayload:    wire,
 		RSSI:          -72,
 		SNR:           8.5,
+	}
+}
+
+// CopyOf builds a second gateway's copy of the same frame: identical bytes,
+// different receiver, different signal, different transport token.
+//
+// The token differs because that is what the wire does — each gateway derives its
+// own from its own concentrator — and because the downlink has to be timed from
+// the copy the engine chose, not from another gateway's. A test that reused one
+// token could not tell those two things apart.
+func CopyOf(wire []byte, gatewayEUI lorawan.EUI64, snr, rssi float64, token byte) gateway.UplinkFrame {
+	f := UplinkFrame(wire, gateway.RxWindow1, EU868Ch0Hz, EU868DR5)
+	f.GatewayID = gatewayEUI
+	f.SNR = snr
+	f.RSSI = rssi
+	f.UplinkID = [8]byte{token, token, token, token, token, token, token, token}
+	return f
+}
+
+// Feed hands the engine a frame the test assembled itself, so a copy from a
+// second gateway does not have to be smuggled through the single-gateway helper.
+//
+// It stamps the arrival time when the caller left it unset, because the engine
+// measures the remaining receive-window budget from it: a frame with no arrival
+// time looks like it arrived at an unknown moment, and the engine correctly
+// declines to subtract anything.
+func (env *Env) Feed(f gateway.UplinkFrame) error {
+	env.t.Helper()
+	if f.ReceivedAt.IsZero() {
+		f.ReceivedAt = env.Clock.Now()
+	}
+	return env.Engine.HandleUplink(context.Background(), f)
+}
+
+// Enqueue queues an application downlink for the standard device.
+//
+// A class-A server answers only when it has something to say, so a test that
+// wants to observe a downlink has to give the engine a reason to send one.
+// Forgetting this is the most common way to write an aggregation or timing test
+// that fails for a reason unrelated to what it is measuring.
+func (env *Env) Enqueue(payload []byte, confirmed bool) {
+	env.t.Helper()
+	if err := env.Engine.EnqueueDownlink(context.Background(),
+		MustEUI64(env.t, DevEUI), 10, payload, confirmed); err != nil {
+		env.t.Fatalf("EnqueueDownlink: %v", err)
 	}
 }
 
@@ -285,6 +360,110 @@ func NewShared(t *testing.T, shared SharedState, mutate func(*engine.Config)) *E
 func newOnStore(t *testing.T, store *engine.MemStore, st engine.Store,
 	mutate func(*engine.Config)) *Env {
 
+	return buildEnv(t, store, st, mutate, nil)
+}
+
+// DeferredScheduler holds scheduled work until a test runs it, which is how the
+// aggregation window becomes observable.
+//
+// The default test scheduler runs callbacks inline, and that is right for
+// everything except a feature whose whole behaviour is "wait, then act": inline
+// execution closes the window before the second gateway's copy can arrive, so
+// the test would be asserting that aggregation does nothing.
+type DeferredScheduler struct {
+	mu    sync.Mutex
+	items []deferredItem
+	// ran accumulates the delays of everything already executed, so a test can
+	// assert on the timing of work it had to let run.
+	ran []time.Duration
+}
+
+type deferredItem struct {
+	delay time.Duration
+	fn    func()
+}
+
+// Pending is how much work is waiting.
+func (d *DeferredScheduler) Pending() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.items)
+}
+
+// Reset forgets both the queued work and the history of what already ran.
+//
+// A test that has just completed a join still has that join's RX1/RX2 delays in
+// its execution history, and a timing assertion made afterwards would be reading
+// the join's numbers. Clearing both halves at once keeps "measure from here"
+// impossible to get half-done.
+func (d *DeferredScheduler) Reset() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.items = nil
+	d.ran = nil
+}
+
+// Delays reports the delay each waiting item was scheduled with, in the order it
+// was scheduled. Assertions about *when* a downlink should go out — the remaining
+// slack after aggregation — are made against this.
+func (d *DeferredScheduler) Delays() []time.Duration {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	out := make([]time.Duration, 0, len(d.items))
+	for _, it := range d.items {
+		out = append(out, it.delay)
+	}
+	return out
+}
+
+// Run executes everything waiting and reports how much there was. Callbacks are
+// taken out of the queue before running, so one that schedules more work leaves
+// it for the next Run rather than recursing.
+func (d *DeferredScheduler) Run() int {
+	d.mu.Lock()
+	items := d.items
+	d.items = nil
+	for _, it := range items {
+		d.ran = append(d.ran, it.delay)
+	}
+	d.mu.Unlock()
+
+	for _, it := range items {
+		it.fn()
+	}
+	return len(items)
+}
+
+// ExecutedDelays reports the delay each item was scheduled with, across every Run
+// so far. Asserting on the *dispatch* delay of a downlink means reading this
+// after the window has run, at which point Pending and Delays are empty.
+func (d *DeferredScheduler) ExecutedDelays() []time.Duration {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]time.Duration(nil), d.ran...)
+}
+
+// NewDeferred builds an environment whose scheduled work waits for the test.
+func NewDeferred(t *testing.T, mutate func(*engine.Config)) (*Env, *DeferredScheduler) {
+	t.Helper()
+
+	store := engine.NewMemStore()
+	sched := &DeferredScheduler{}
+	env := buildEnv(t, store, store.Store(), mutate, func(delay time.Duration, fn func()) {
+		sched.mu.Lock()
+		defer sched.mu.Unlock()
+		sched.items = append(sched.items, deferredItem{delay: delay, fn: fn})
+	})
+	env.sched = sched
+	return env, sched
+}
+
+// buildEnv constructs the engine. scheduler nil means the inline one, which is
+// what nearly every test wants.
+func buildEnv(t *testing.T, store *engine.MemStore, st engine.Store,
+	mutate func(*engine.Config), scheduler func(time.Duration, func())) *Env {
+
 	cfg := engine.DefaultConfig()
 	cfg.NetID = MustNetID(t, "010203")
 	cfg.Region = "EU868"
@@ -294,12 +473,15 @@ func newOnStore(t *testing.T, store *engine.MemStore, st engine.Store,
 
 	clk := &Clock{t: time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)}
 	gw := &Gateway{}
+	if scheduler == nil {
+		// Run scheduled transmissions inline so assertions are deterministic.
+		scheduler = func(_ time.Duration, fn func()) { fn() }
+	}
 
 	eng, err := engine.New(cfg, st, gw,
 		engine.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))),
 		engine.WithClock(clk.Now),
-		// Run scheduled transmissions inline so assertions are deterministic.
-		engine.WithScheduler(func(_ time.Duration, fn func()) { fn() }),
+		engine.WithScheduler(scheduler),
 	)
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)

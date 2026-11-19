@@ -183,6 +183,7 @@ func (e *Engine) handleDataUplink(ctx context.Context, frame gateway.UplinkFrame
 		Confirmed:      phy.MHDR.MType == lorawan.MTypeConfirmedDataUp,
 		Retransmission: retransmission,
 		ACK:            fhdr.FCtrl.ACK,
+		Receptions:     uplinkReceptions(frame),
 	}); err != nil {
 		e.log.Error("record uplink failed", "dev_eui", ses.DevEUI, "err", err)
 	}
@@ -192,7 +193,11 @@ func (e *Engine) handleDataUplink(ctx context.Context, frame gateway.UplinkFrame
 	}
 	ses.LastUplinkAt = e.now()
 	ses.LastRSSI = frame.RSSI
-	ses.LastSNR = frame.SNR
+	// The best SNR across every gateway copy, not the chosen copy's. A device on
+	// the edge of two gateways should be credited with the link it actually has;
+	// the first packet to arrive is a routing accident, and using its SNR would
+	// hold such a device at a slower data rate than the network can support.
+	ses.LastSNR = maxReceptionSNR(frame)
 	ses.LastGatewayID = frame.GatewayID
 	ses.LastFrequencyHz = frame.FrequencyHz
 	ses.LastDataRateIndex = frame.DataRateIndex
@@ -206,12 +211,12 @@ func (e *Engine) handleDataUplink(ctx context.Context, frame gateway.UplinkFrame
 	// would fill the window with copies of the same measurement and make the
 	// loss estimate in the same window meaningless.
 	if !retransmission {
-		recordUplinkHistory(ses, fcntUp, frame.SNR)
+		recordUplinkHistory(ses, fcntUp, maxReceptionSNR(frame))
 	}
 
 	// --- MAC engine ----------------------------------------------------------
 
-	replies, err := e.processMACCommands(ctx, dev, ses, cmds, reg)
+	replies, err := e.processMACCommands(ctx, dev, ses, cmds, reg, len(frame.AllReceptions()))
 	if err != nil {
 		return err
 	}

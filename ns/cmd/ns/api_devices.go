@@ -317,6 +317,144 @@ func (s *apiServer) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, newDeviceView(dev))
 }
 
+// patchDeviceRequest is the body of PATCH /api/v1/devices/{dev_eui}.
+//
+// Every field is a pointer so that "leave this alone" is distinguishable from
+// "set it to false" — the distinction a console toggle depends on, since a
+// plain bool would make omitting disable_adr mean "enable ADR" on every request
+// that only renames a device.
+//
+// Credentials are deliberately absent. This endpoint changes what the network
+// does with a device; it does not change what the device is allowed to prove.
+// Keeping keys out also means an operator never has to retype an AppKey to fix a
+// typo in a name, which is what makes this usable at all: the keys are the one
+// thing this API never returns.
+type patchDeviceRequest struct {
+	Name           *string `json:"name"`
+	Group          *string `json:"group"`
+	Enabled        *bool   `json:"enabled"`
+	DisableADR     *bool   `json:"disable_adr"`
+	SupportsClassC *bool   `json:"supports_class_c"`
+	MaxDataRate    *int    `json:"max_data_rate"`
+	MinDataRate    *int    `json:"min_data_rate"`
+	MaxTxPower     *int    `json:"max_tx_power"`
+}
+
+// handlePatchDevice serves PATCH /api/v1/devices/{dev_eui}.
+//
+// It exists because PUT is a replace that demands credentials, and this API
+// never returns them — so a client that follows the rules could load a device,
+// change its name and be unable to save it. Read-modify-write inside the process
+// is what closes that loop: the keys are read from the store and written back
+// untouched, and no response ever carries them.
+//
+// The join-nonce counter and DevNonce replay log survive for the same reason
+// handleUpdateDevice carries them over: they are replay protection, not
+// operator input.
+func (s *apiServer) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
+	pathEUI, ok := pathDevEUI(w, r)
+	if !ok {
+		return
+	}
+
+	body := http.MaxBytesReader(w, r.Body, 4096)
+	var req patchDeviceRequest
+	dec := json.NewDecoder(body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		badRequest(w, "body must be a JSON object with the fields documented for this endpoint: "+err.Error())
+		return
+	}
+	if err := dec.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		badRequest(w, "body must contain exactly one JSON object")
+		return
+	}
+
+	existing, err := s.devices.DeviceByDevEUI(r.Context(), pathEUI)
+	if errors.Is(err, engine.ErrNotFound) {
+		notFound(w, "dev_eui "+pathEUI.String()+" is not provisioned")
+		return
+	}
+	if err != nil {
+		s.log.Error("look up a device before patching it", "dev_eui", pathEUI, "err", err)
+		writeError(w, http.StatusInternalServerError, msgStoreUnavailable)
+		return
+	}
+
+	if msg := applyDevicePatch(existing, req); msg != "" {
+		badRequest(w, msg)
+		return
+	}
+	if err := s.devices.SaveDevice(r.Context(), existing); err != nil {
+		s.log.Error("patch a device", "dev_eui", pathEUI, "err", err)
+		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
+		return
+	}
+	s.log.Info("device patched", "dev_eui", pathEUI, "name", existing.Name,
+		"enabled", existing.Enabled, "disable_adr", existing.DisableADR)
+	writeJSON(w, http.StatusOK, newDeviceView(existing))
+}
+
+// applyDevicePatch writes the present fields onto dev and returns a message when
+// a value is unusable, in which case dev is left as it was.
+//
+// Validation happens against the assembled record rather than each field alone,
+// so min_data_rate above an existing max_data_rate is caught even though neither
+// value is wrong by itself.
+func applyDevicePatch(dev *engine.Device, req patchDeviceRequest) string {
+	next := *dev // validated on a copy so a rejected field cannot half-apply
+
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if len(name) > maxNameLen {
+			return "name must be at most 120 characters"
+		}
+		next.Name = name
+	}
+	if req.Group != nil {
+		group := strings.TrimSpace(*req.Group)
+		if len(group) > maxNameLen {
+			return "group must be at most 120 characters"
+		}
+		next.Group = group
+	}
+	if req.Enabled != nil {
+		next.Enabled = *req.Enabled
+	}
+	if req.DisableADR != nil {
+		next.DisableADR = *req.DisableADR
+	}
+	if req.SupportsClassC != nil {
+		next.SupportsClassC = *req.SupportsClassC
+	}
+	for _, f := range []struct {
+		label string
+		in    *int
+		out   *int
+	}{
+		{"max_data_rate", req.MaxDataRate, &next.MaxDataRate},
+		{"min_data_rate", req.MinDataRate, &next.MinDataRate},
+		{"max_tx_power", req.MaxTxPower, &next.MaxTxPower},
+	} {
+		if f.in == nil {
+			continue
+		}
+		// -1 means "whatever the band allows". Anything else must be a real
+		// index; accepting 99 would store a limit that never binds and reads as
+		// a working restriction in the console.
+		if *f.in != engine.UseRegionDefault && (*f.in < 0 || *f.in > 15) {
+			return f.label + " must be -1 (region default) or 0..15"
+		}
+		*f.out = *f.in
+	}
+	if next.MinDataRate != engine.UseRegionDefault && next.MaxDataRate != engine.UseRegionDefault &&
+		next.MinDataRate > next.MaxDataRate {
+		return "min_data_rate must not exceed max_data_rate"
+	}
+	*dev = next
+	return ""
+}
+
 // handleDeleteDevice serves DELETE /api/v1/devices/{dev_eui}.
 //
 // Deleting removes the session too, which is the point: revoking a device has to

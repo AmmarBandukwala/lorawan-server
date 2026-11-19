@@ -52,6 +52,34 @@ const (
 	// running or not addressable, the other is one that is running and wedged.
 	ErrNetworkServerUnreachable = "network_server_unreachable"
 	ErrNetworkServerTimeout     = "network_server_timed_out"
+
+	// Control-plane failures. Each names the action that failed rather than the
+	// layer that noticed, because the operator's next step depends on the action:
+	// "downlink_queue_failed" means look at the device's window, "status_query_failed"
+	// means look at the network server.
+	ErrControllerNotConfigured = "network_server_not_configured"
+	ErrDownlinkQueueFailed     = "downlink_queue_failed"
+	ErrDeviceStatusFailed      = "device_status_request_failed"
+	ErrSessionQueryFailed      = "session_query_failed"
+	ErrStatusQueryFailed       = "status_query_failed"
+	ErrDeviceUpdateFailed      = "device_update_failed"
+	ErrDeviceDeleteFailed      = "device_delete_failed"
+
+	// Control-plane input rejections.
+	ErrFPortOutOfRange = "f_port_out_of_range"
+	ErrPayloadRequired = "payload_required"
+	ErrPayloadHex      = "payload_must_be_hex"
+	ErrPayloadTooLong  = "payload_too_long"
+	// ErrNoFieldsToChange rejects an empty PATCH. Forwarding it would be a
+	// no-op round trip whose 200 the console would report as a save that
+	// changed nothing, which reads as a bug in the form rather than an empty
+	// submission.
+	ErrNoFieldsToChange = "no_fields_to_change"
+	// ErrDataRateOutOfRange covers max_data_rate, min_data_rate and
+	// max_tx_power, whose valid range is the same -1 (region default) or 0..15.
+	// One code rather than three, because the fix is identical.
+	ErrDataRateOutOfRange = "data_rate_or_tx_power_must_be_minus_1_or_0_to_15"
+	ErrDataRateOrder      = "min_data_rate_must_not_exceed_max_data_rate"
 )
 
 // Input limits. Each is enforced here and mirrored by the database schema; the

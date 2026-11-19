@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -90,14 +91,35 @@ func (e *APIError) Error() string {
 // Client is a network-server API client.
 type Client struct {
 	baseURL string
-	token   string
-	http    *http.Client
+	// statusURL is where /status lives. It is usually a different port from
+	// baseURL: the network server keeps its read-only health endpoint separate
+	// from the token-protected application API, because the two carry different
+	// guarantees and the health one is often bound to loopback only.
+	statusURL string
+	token     string
+	http      *http.Client
+}
+
+// Option adjusts a Client at construction.
+type Option func(*Client)
+
+// WithStatusURL points the health read at a different base URL. An empty value
+// is ignored, so a caller can pass an unset environment variable and keep the
+// default of reading from the same host as everything else.
+func WithStatusURL(raw string) Option {
+	return func(c *Client) {
+		trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
+		if trimmed == "" {
+			return
+		}
+		c.statusURL = trimmed
+	}
 }
 
 // New builds a client. baseURL must be an absolute http(s) URL; anything else is
 // rejected here rather than failing on the first request, when the cause is
 // harder to see.
-func New(baseURL, token string) (*Client, error) {
+func New(baseURL, token string, opts ...Option) (*Client, error) {
 	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	parsed, err := url.Parse(trimmed)
 	if err != nil {
@@ -109,13 +131,23 @@ func New(baseURL, token string) (*Client, error) {
 	if token == "" {
 		return nil, fmt.Errorf("nsclient: an API token is required")
 	}
-	return &Client{
+	c := &Client{
 		baseURL: trimmed,
 		token:   token,
 		// The network server may be starting alongside this process, so a short
 		// timeout beats waiting for a container that is not answering.
 		http: &http.Client{Timeout: requestTimeout},
-	}, nil
+	}
+	c.statusURL = c.baseURL
+	for _, opt := range opts {
+		opt(c)
+	}
+	if c.statusURL == c.baseURL {
+		slog.Info("nsclient: reading /status from the API base URL; "+
+			"set NS_STATUS_URL when the network server serves it on its status port",
+			"base", c.baseURL)
+	}
+	return c, nil
 }
 
 // CreateDevice provisions a device.

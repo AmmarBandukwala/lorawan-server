@@ -84,6 +84,9 @@ services:
       # device is. See api/internal/nsclient.
       NS_API_URL: http://ns:8091
       NS_API_TOKEN: ${NS_API_TOKEN}
+      # Health is read from the ns's status port, not the API port: /status is
+      # served there and is not behind the API token.
+      NS_STATUS_URL: http://ns:8090
     depends_on:
       db:
         condition: service_healthy

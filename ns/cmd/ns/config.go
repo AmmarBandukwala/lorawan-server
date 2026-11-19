@@ -45,7 +45,10 @@ type config struct {
 	// compliance claim: a crash forgets the bookings made since the last flush,
 	// so the interval is the window of occupancy a restart under-counts.
 	ledgerFlushInterval time.Duration
-	logLevel            slog.Level
+	// aggregationDelay is how long to wait for other gateways' copies of a frame.
+	// Negative means unset, which leaves the engine's default in force.
+	aggregationDelay time.Duration
+	logLevel         slog.Level
 
 	// disableDutyCycle turns off the server's own airtime enforcement. It
 	// exists for test rigs and for concentrators known to enforce locally;
@@ -85,6 +88,12 @@ func loadConfig() (config, error) {
 		gatewayTimeout:       envDuration("NS_GATEWAY_TIMEOUT", 3*time.Minute),
 		gatewayFlushInterval: envDuration("NS_GATEWAY_FLUSH_INTERVAL", 30*time.Second),
 		ledgerFlushInterval:  envDuration("NS_LEDGER_FLUSH_INTERVAL", DefaultLedgerFlushInterval),
+
+		// -1 means "unset", so the engine's own default stays authoritative and
+		// this package does not duplicate the constant. An explicit 0 is honoured
+		// as "do not wait for other gateways", which is the only way to turn
+		// aggregation off.
+		aggregationDelay: envDuration("NS_AGGREGATION_DELAY", -1),
 	}
 
 	netIDStr := envString("NS_NET_ID", "000000")

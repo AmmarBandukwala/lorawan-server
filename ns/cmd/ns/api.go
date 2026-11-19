@@ -60,6 +60,7 @@ func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceR
 	mux.HandleFunc("POST /api/v1/devices", s.requireAuth(s.handleCreateDevice))
 	mux.HandleFunc("GET /api/v1/devices/{dev_eui}", s.requireAuth(s.handleGetDevice))
 	mux.HandleFunc("PUT /api/v1/devices/{dev_eui}", s.requireAuth(s.handleUpdateDevice))
+	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", s.requireAuth(s.handlePatchDevice))
 	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", s.requireAuth(s.handleDeleteDevice))
 
 	s.http = &http.Server{

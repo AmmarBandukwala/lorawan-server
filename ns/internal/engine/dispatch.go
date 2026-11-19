@@ -20,6 +20,11 @@ import (
 // rejected the frame). Protocol rejections — unknown device, bad MIC, replay —
 // are recorded as events and return nil, because they are routine on real radio
 // and must not stop a transport read loop.
+//
+// The same frame usually arrives several times, once per gateway that heard it.
+// Those copies are collected rather than discarded, and the frame is handled
+// once, through the copy with the best signal. See aggregate.go for why the
+// collection window is the right shape.
 func (e *Engine) HandleUplink(ctx context.Context, frame gateway.UplinkFrame) error {
 	if len(frame.PHYPayload) == 0 {
 		return errors.New("engine: empty PHYPayload")
@@ -37,9 +42,38 @@ func (e *Engine) HandleUplink(ctx context.Context, frame gateway.UplinkFrame) er
 			fmt.Sprintf("gateway delivered a %s frame", phy.MHDR.MType))
 	}
 
-	// The same frame is usually received by several gateways. Answer it once.
+	// A frame the server cannot name — no join tuple, no MAC payload — has no
+	// identity to collect copies under, so it is handled on its own.
 	key := dedupKey(phy)
-	if key != "" {
+	if key == "" {
+		return e.handleFrame(ctx, frame)
+	}
+
+	switch e.startCollection(key, frame) {
+	case collectionOpened:
+		e.startAggregation(ctx, key, frame)
+		return nil
+	case collectionJoined:
+		// Another copy is already being gathered, and that one will answer.
+		return nil
+	default:
+		return e.dropEvent(ctx, frame, phy, ReasonDuplicateFrame,
+			"identical frame already processed within the dedup window")
+	}
+}
+
+// handleFrame runs the protocol for one merged frame.
+func (e *Engine) handleFrame(ctx context.Context, frame gateway.UplinkFrame) error {
+	phy, err := lorawan.ParsePHYPayload(frame.PHYPayload)
+	if err != nil {
+		return e.dropEvent(ctx, frame, nil, "malformed_frame", err.Error())
+	}
+
+	// The cross-process claim is taken here rather than on arrival so that the
+	// copies gathered inside the window become one claim, made by whichever
+	// instance is about to answer. Claiming on arrival would either let a second
+	// instance answer the same frame or force every copy to hit the database.
+	if key := dedupKey(phy); key != "" {
 		duplicate, err := e.claimFrame(ctx, key)
 		if err != nil {
 			// Fail open. The shared book being unreachable is a database
@@ -52,8 +86,9 @@ func (e *Engine) HandleUplink(ctx context.Context, frame gateway.UplinkFrame) er
 		}
 		if duplicate {
 			return e.dropEvent(ctx, frame, phy, ReasonDuplicateFrame,
-				"identical frame already processed within the dedup window")
+				"identical frame already answered by another instance")
 		}
+		e.markProcessed(key)
 	}
 
 	switch phy.MHDR.MType {
