@@ -47,6 +47,40 @@ to settle it.
 | `internal/region` (registry) | The one list of implemented bands, read by the operator API and the console so neither can offer a band the server rejects | M6 ✅ |
 | `api` + Fieldnode UI | Device management in the console: read settings, patch them, revoke; relayed to the ns, which owns the row | M6 ✅ |
 
+## Structure conventions
+
+These are the rules this tree follows, written down so a change that breaks one
+is visibly a change in policy rather than a matter of taste.
+
+- **Flat until it hurts.** A package earns a subdirectory when it contains more
+  than one thing a reader needs to hold separately, not before. `internal/gateway`
+  has `semtech/` and `lbs/` because those are two protocols with nothing to share;
+  it has no `types/` or `internal/` of its own because there would be one file in each.
+- **Grouped by domain, not by layer.** There is no `models/`, `handlers/` or
+  `repositories/`. A band's rules live in `internal/region`, a session's rules in
+  `internal/engine`, and a store's SQL beside the types it reads — so a change to
+  one behaviour is one directory, not a sweep.
+- **Entry points are wiring only.** `cmd/ns/main.go` loads config, builds
+  subsystems, orders startup and shutdown, and delegates. Anything with a branch
+  in it that is not about lifecycle belongs in an `internal` package.
+- **`internal/` everywhere.** Nothing here is a library for another module, so
+  there is no `pkg/`, and the compiler enforces the boundary.
+- **Interfaces live with the consumer.** `engine.Gateway` is one method, declared
+  where the capability is needed, so the engine can be tested with a stub that
+  knows nothing about UDP. The frame types both sides speak are in
+  `internal/gateway`, which imports only `internal/lorawan` — nothing that
+  imports the engine imports it back, which is what keeps the dependency arrow
+  pointing inward and the engine↔transport cycle out of the import graph.
+  `gateway.Lazy` covers the one place construction order forces a two-step wire.
+- **Constructors return concrete types.** `New` gives back `*Engine`, `*Server`,
+  `*Store`, so callers can reach whatever the type actually offers and tests can
+  substitute at the interface that matters.
+- **Tests sit beside what they test.** See below.
+- **Files are named by responsibility and stay single-purpose.** A file that has
+  grown past one responsibility is split along it, which is why the airtime
+  ledger is `dutycycle.go` (the accounting) plus `airtime.go` (the report and the
+  durable log). Package and identifier names do not stutter.
+
 ## Testing
 
 Every test lives next to the code it exercises. There is no parallel `test/`
