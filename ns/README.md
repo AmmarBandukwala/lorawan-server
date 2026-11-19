@@ -91,9 +91,11 @@ to settle it.
    the band's limit. Device provisioning over the API, which is what the
    Fieldnode console's registration form calls.
    *Remaining:* the bench pass itself — a real gateway and device per region,
-   verifying downlink timing per concentrator family — and the conformance
-   checklist. Neither is possible without hardware, so this milestone is not
-   closed and should not be described as such.
+   verifying downlink timing per concentrator family. The procedure for it, with
+   the expected value for every band this build implements, is
+   [`docs/BENCH.md`](docs/BENCH.md); it is written and ready to run, and nothing
+   in it can be done without hardware, so this milestone is not closed and
+   should not be described as such.
 
 7. **M7 — what is genuinely left:**
    *Console and API:* device management now runs end to end through the console,
@@ -113,7 +115,8 @@ to settle it.
      500 kHz rate is a jump of far more than the 3 dB the algorithm reasons in.
    * **No key rotation and no device-profile objects** beyond the per-device
      fields, so a fleet-wide change is a loop over devices.
-   * **The bench pass and conformance checklist**, which need hardware.
+   * **The bench pass**, which needs hardware. The checklist it follows is
+     written — [`docs/BENCH.md`](docs/BENCH.md) — and is the last open item.
 
 ## Downlink lifecycle
 
