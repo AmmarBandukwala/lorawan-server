@@ -1,0 +1,19 @@
+-- The Fieldnode database starts empty on purpose.
+--
+-- Every table is created by the migration set of the service that owns it:
+--
+--   ns_*   protocol state (devices, sessions, traffic, events, gateways),
+--          created by ns/internal/storage/pgstore/migrations
+--   facility_profile
+--          dashboard-only display preference, created by
+--          api/internal/storage/postgres/migrations
+--
+-- This file used to create a parallel set of tables (devices, device_sessions,
+-- uplinks, uplink_gateways, downlinks, gateways) that no service ever wrote to,
+-- while the network server kept the real traffic in its own ns_* tables. The
+-- dashboard read the empty mirror, which is why it showed zeros no matter what
+-- happened on the radio. One owner per table is what stops that coming back.
+--
+-- This file is mounted into /docker-entrypoint-initdb.d, which PostgreSQL runs
+-- only when the data directory is first initialised, so it could never repair an
+-- existing volume — one more reason the schema belongs in the migration runners.
