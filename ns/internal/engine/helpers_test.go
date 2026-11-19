@@ -1,6 +1,6 @@
 // In-package test helpers for the engine's white-box tests.
 //
-// Why this exists next to ns/test/testenv, which does the same job: a Go
+// Why this exists next to ns/internal/testenv, which does the same job: a Go
 // package's own tests cannot import anything that imports that package, so a
 // shared out-of-package harness is unreachable from here. The tests that remain
 // in this package need it — the duty-cycle tests reach engine.budget to

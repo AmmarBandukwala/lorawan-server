@@ -103,12 +103,24 @@ func DefaultConfig() Config {
 	}
 }
 
+// Gateway is the single behaviour the engine needs from a gateway transport:
+// put an already-scheduled downlink on the air.
+//
+// It is declared here, at the point of use, rather than imported. Transports
+// satisfy it structurally, so adding one never touches this package, and a test
+// can hand the engine a stub without pulling in transport machinery. The frame
+// types stay in internal/gateway because both sides speak them; only the
+// capability the consumer requires lives here.
+type Gateway interface {
+	SendDownlink(ctx context.Context, f gateway.DownlinkFrame) error
+}
+
 // Engine is the network-server core. A single Engine is safe for concurrent
 // use; it holds no per-connection state.
 type Engine struct {
 	cfg           Config
 	store         Store
-	gw            gateway.Gateway
+	gw            Gateway
 	log           *slog.Logger
 	defaultRegion region.Region
 
@@ -143,7 +155,7 @@ func WithClock(fn func() time.Time) Option { return func(e *Engine) { e.nowFn = 
 
 // New builds an Engine. store must have all three ports set and gw must not be
 // nil; the region in cfg.Region must be supported.
-func New(cfg Config, store Store, gw gateway.Gateway, opts ...Option) (*Engine, error) {
+func New(cfg Config, store Store, gw Gateway, opts ...Option) (*Engine, error) {
 	if err := store.Validate(); err != nil {
 		return nil, err
 	}

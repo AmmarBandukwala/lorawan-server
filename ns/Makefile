@@ -11,11 +11,11 @@ test:
 	docker run --rm -v "$(CURDIR)":/src -w /src $(GO_IMAGE) go test ./...
 
 # test-pg runs the store round trip against a real PostgreSQL, so the SQL in
-# internal/storage/pgstore is executed and not merely compiled. Without
+# internal/pgstore is executed and not merely compiled. Without
 # NS_TEST_DSN the suite skips itself, which is why it is a separate target.
 test-pg:
 	docker run --rm -v "$(CURDIR)":/src -w /src -e NS_TEST_DSN="$(NS_TEST_DSN)" \
-		$(GO_IMAGE) go test ./test/database/ -count=1 -v
+		$(GO_IMAGE) go test ./internal/pgstore/ -count=1 -v
 
 # test-short skips anything that needs a network, a socket held open for long,
 # or a database; useful in a loop while editing.

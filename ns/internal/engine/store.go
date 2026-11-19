@@ -4,7 +4,7 @@
 //
 // The package deliberately has no database, transport or HTTP dependency: state
 // lives behind the DeviceRepo / SessionRepo / Recorder interfaces and radio I/O
-// behind gateway.Gateway. That is what makes the whole join/uplink/downlink
+// behind the Gateway port. That is what makes the whole join/uplink/downlink
 // flow testable in a single process with a simulated device.
 //
 // The ambiguous cases the specification leaves open — frame-counter semantics,

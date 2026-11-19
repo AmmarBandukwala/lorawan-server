@@ -36,7 +36,7 @@ import (
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/lbs"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
-	"github.com/fieldnode/lorawan-server/ns/internal/storage/pgstore"
+	"github.com/fieldnode/lorawan-server/ns/internal/pgstore"
 )
 
 func main() {

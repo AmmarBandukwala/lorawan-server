@@ -62,11 +62,11 @@ type UplinkHistoryItem struct {
 	TxPowerIndex int     `json:"tx_power_index"`
 }
 
-// ADRDecision is what the algorithm returns. It never mutates anything: the
+// adrDecision is what the algorithm returns. It never mutates anything: the
 // caller turns it into a LinkADRReq and applies it only once the device
 // acknowledges, which is the difference between "the server believes" and "the
 // device is doing".
-type ADRDecision struct {
+type adrDecision struct {
 	DataRate     int
 	TxPowerIndex int
 	NbTrans      int
@@ -163,8 +163,8 @@ func max125kHzUplinkDataRate(reg region.Region, upper int) int {
 }
 
 // adrDecide runs the algorithm. It is pure: same input, same decision.
-func adrDecide(in adrInput) ADRDecision {
-	resp := ADRDecision{
+func adrDecide(in adrInput) adrDecision {
+	resp := adrDecision{
 		DataRate:     in.DataRate,
 		TxPowerIndex: in.TxPowerIndex,
 		NbTrans:      in.NbTrans,
@@ -217,7 +217,7 @@ func adrDecide(in adrInput) ADRDecision {
 	return finishADR(resp, in)
 }
 
-func finishADR(d ADRDecision, in adrInput) ADRDecision {
+func finishADR(d adrDecision, in adrInput) adrDecision {
 	d.Changed = d.DataRate != in.DataRate || d.TxPowerIndex != in.TxPowerIndex || d.NbTrans != in.NbTrans
 	return d
 }

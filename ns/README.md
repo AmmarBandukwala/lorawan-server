@@ -28,28 +28,56 @@ to settle it.
 | `internal/region` | EU868 / US915 / AS923 tables: data rates, RX1 mapping, channels, duty cycle, dwell time, max payload sizes | M1 ✅ |
 | `internal/engine` | Join server, uplink handler, FCnt/replay/dedup, RX-window planning, downlink queue, MAC engine | M2 ✅ |
 | `internal/sim` | Simulated Class-A device (OTAA, MAC answers) that drives the engine in tests and the demo | M2 ✅ |
-| `internal/storage/pgstore` | PostgreSQL persistence (pgx) with embedded, advisory-locked migrations | M2 ✅ |
+| `internal/pgstore` | PostgreSQL persistence (pgx) with embedded, advisory-locked migrations | M2 ✅ |
 | `internal/gateway` | Transport contract: `UplinkFrame` / `DownlinkFrame`, RX windows, `Gateway` port | M2 ✅ (types) |
 | `cmd/nsdemo` | End-to-end walkthrough with no radio: join → uplink → downlink → ADR → dedup → replay | M2 ✅ |
 | `internal/gateway/semtech` | Semtech UDP packet forwarder: `push_data` / `pull_data` / `pull_resp` / `tx_ack`, gateway registry, downlink timing | M3 ✅ |
 | `internal/gateway/lbs` | LoRa Basics Station over WebSocket: handshake and `router_config`, `jreq`/`updf`, `dnmsg`, `dntxed`, `timesync`, xtime scheduling, transmission tracking | M6 ✅ |
 | `cmd/ns` | The network-server process: env config, UDP listener, status endpoint, graceful shutdown | M3 ✅ |
 | `cmd/nsbench` | Simulated gateway + class-A device that drives a running `ns` over real UDP | M3 ✅ |
-| `test/contract` | Our output against published vectors: RFC 4493, ChirpStack frames and keys, RP002 band tables | M1 ✅ |
-| `test/scenarios` | Device sessions driven through the engine's exported API: join, uplink, downlink, replay, ADR, MAC | M2 ✅ |
-| `test/transport` | Whole radio path over a real UDP socket, including downlink `tmst` timing | M3 ✅ |
-| `test/database` | PostgreSQL store against a real server (opt-in via `NS_TEST_DSN`) | M2 ✅ |
-| `test/testenv`, `test/testforwarder` | Shared harnesses: engine + simulated device; a Semtech packet forwarder | — |
+| `internal/testenv`, `internal/testforwarder` | Test-only harnesses: engine + simulated device; a Semtech packet forwarder. Imported by tests, never by the server | — |
 | `internal/region` (mask, user channels) | Per-device channel plan: ChMaskCntl semantics per band, dynamic channels layered over the band table | M4 ✅ |
 | `internal/engine` (adr, requests) | SNR-window ADR, outstanding MAC requests re-sent until answered, duty-cycle / TX-param / RX-timing / NewChannel loops | M4 ✅ |
 | `internal/integration` | Event fan-out to application webhooks | M5 ✅ |
 | `cmd/ns` (api) | Authenticated application API: downlink queue, session read, DevStatus | M5 ✅ |
 | `internal/region` (toa, subband) | Time on air for LoRa and FSK; EU868 sub-band table with per-sub-band duty cycle | M6 ✅ |
-| `internal/engine` (dutycycle) | Transmit ledger: accounts for ToA before scheduling, defers a frame that would breach the limit | M6 ✅ |
+| `internal/engine` (dutycycle, airtime) | Transmit ledger: accounts for ToA before scheduling, defers a frame that would breach the limit; the second file is the operator-facing usage report and the durable booking log | M6 ✅ |
 | `cmd/ns` (device API) | Device provisioning: list/get/create/replace/patch/delete, keys never returned | M6 ✅ |
 | `internal/engine` (aggregate) | Multi-gateway reception: copies of one frame are merged over a 200 ms window and answered through the best-SNR copy | M6 ✅ |
 | `internal/region` (registry) | The one list of implemented bands, read by the operator API and the console so neither can offer a band the server rejects | M6 ✅ |
 | `api` + Fieldnode UI | Device management in the console: read settings, patch them, revoke; relayed to the ns, which owns the row | M6 ✅ |
+
+## Testing
+
+Every test lives next to the code it exercises. There is no parallel `test/`
+tree, because the reason usually given for one does not apply: an *external*
+test package (`package foo_test`) sitting in the same directory as `foo` may
+import a harness that imports `foo`, so cross-package tests need nowhere else to
+go.
+
+| The test… | Lives as | Because |
+|---|---|---|
+| reaches an unexported function, field or constant | `foo/x_test.go`, `package foo` | Go forbids the alternative |
+| uses only the exported API of one package | `foo/x_test.go`, `package foo_test` | reads as a caller would |
+| checks our output against a published vector | `*_vectors_test.go` beside the package under contract | the specification is the subject, so a failure names the standard |
+| drives a device session through the engine | `internal/engine/*_scenario_test.go` | behaviour of the exported engine API |
+| needs a real UDP socket and a gateway's side of the wire | `internal/gateway/semtech/*_test.go` | timing is only observable on the wire |
+| needs PostgreSQL | `internal/pgstore/*_test.go`, skipped without `NS_TEST_DSN` | external system |
+
+The two harnesses are packages rather than files because a shared harness
+cannot live inside the package it drives — and that constraint is useful: it
+forces the engine and the transports to be drivable through their exported API,
+which is what `testenv` and `testforwarder` do.
+
+`testenv` builds an engine with an in-memory store, a gateway that records
+instead of transmitting, a clock that only moves when a test says so, and a
+simulated device that produces spec-correct frames. `testforwarder` speaks the
+Semtech protocol through the exported `semtech` API on purpose, making it a
+second independent consumer of the wire format.
+
+If a test seems to need internals for no good reason, that is a signal: usually
+it can be rewritten against the exported surface, and if it cannot, the reason
+is worth writing down in the file.
 
 ## Milestones
 
@@ -367,10 +395,19 @@ make vet         # go vet ./...
 make demo        # go run ./cmd/nsdemo — narrated OTAA session, no radio
 ```
 
-Tests are split between `test/` (cross-package and specification tests, driven
-through exported API) and `*_test.go` beside the file they test (white-box tests
-of one package's internals). `test/README.md` is the map: where a new test goes,
-what each suite covers, and how to read a failure in it.
+Every test lives beside the code it exercises. Cross-package suites — a join
+driven through the engine, a frame pushed over a real UDP socket, the Postgres
+store against a real database — are named `*_scenario_test.go` inside the package
+they exercise, so the file name says how much of the system it touches. Shared
+fixtures (a fake gateway, a simulated device, a store) live in `internal/testenv`
+and `internal/sim`, which are importable by tests everywhere and by no
+production binary.
+
+To read a failure: the test file names the package, the scenario file names the
+flow, and each scenario test's doc comment states the property it pins. A
+`*_vectors_test.go` failure means a value taken from the specification or from
+ChirpStack no longer matches, which is a different class of bug from a logic
+error and usually means a transcription mistake.
 
 The PostgreSQL store has an opt-in integration test; `go test ./...` skips it
 unless a DSN is supplied:

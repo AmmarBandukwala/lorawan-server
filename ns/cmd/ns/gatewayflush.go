@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
-	"github.com/fieldnode/lorawan-server/ns/internal/storage/pgstore"
+	"github.com/fieldnode/lorawan-server/ns/internal/pgstore"
 )
 
 // gatewayPersister stores the transport's gateway registry. Only the Postgres
