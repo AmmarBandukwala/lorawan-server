@@ -171,6 +171,18 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	}
 	lazy.Set(router)
 
+	// What the console shows someone who is standing in front of a gateway with
+	// nothing configured yet. The UDP transport is reported as unsecured because
+	// it genuinely is: the protocol carries no credential, so anyone on a network
+	// that can reach the port can claim a gateway EUI and inject uplinks. Saying
+	// so is more useful than letting it be discovered as a mystery.
+	listeners := []listenerView{
+		newListenerView("semtech-udp", cfg.listenAddr, false),
+	}
+	if station != nil {
+		listeners = append(listeners, newListenerView("basic-station", cfg.lbsAddr, cfg.lbsToken != ""))
+	}
+
 	// Gateway presence is persisted on a timer so the dashboard can answer
 	// "which gateways do we have, and are they up" from the database. Stopping
 	// it is ordered before the pool closes, because its final flush writes.
@@ -185,7 +197,7 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 
 	var status *statusServer
 	if cfg.statusAddr != "" && !strings.EqualFold(cfg.statusAddr, "off") {
-		status = newStatusServer(cfg.statusAddr, log.With("component", "status"), router, eng, integrations)
+		status = newStatusServer(cfg.statusAddr, log.With("component", "status"), router, eng, integrations, listeners)
 		if err := status.Start(); err != nil {
 			_ = srv.Close()
 			if station != nil {

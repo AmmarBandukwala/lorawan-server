@@ -498,3 +498,215 @@ func TestDeviceCapabilityRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestDeviceContextRoundTrip pins attributes and the installed position against
+// the real schema.
+//
+// These two features are the ones a unit test cannot reach: attributes cross a
+// JSONB boundary where a wrong decode turns a map into an empty map, and the
+// position is three nullable columns whose whole meaning is the difference
+// between "no position" and "position at 0,0". A SELECT list and an argument
+// list that disagree by one entry produce a device parked in the Gulf of Guinea
+// with no error raised anywhere, and the migration's own CHECK constraints are
+// only exercised by a database that has them.
+func TestDeviceContextRoundTrip(t *testing.T) {
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		t.Skipf("%s is not set; skipping the PostgreSQL round trip", dsnEnv)
+	}
+	ctx := context.Background()
+
+	store, err := pgstore.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open (connect + migrate): %v", err)
+	}
+	defer store.Close()
+
+	suffix := time.Now().UnixNano() % 0xFFFFFF
+	devEUI := mustEUI(t, fmt.Sprintf("00CC223344%06X", suffix))
+
+	dev := engine.NewOTAADevice(devEUI, mustEUI(t, "0102030405060708"),
+		mustKey(t, "2b7e151628aed2a6abf7158809cf4f3c"))
+	dev.Name = "pg-context"
+	dev.Group = "cold-chain"
+	dev.Attributes = map[string]string{"line": "3", "purpose": "cold store"}
+	dev.Location = &engine.Location{Latitude: 51.5074, Longitude: -0.1278, Altitude: 14}
+
+	if err := store.SaveDevice(ctx, dev); err != nil {
+		t.Fatalf("SaveDevice: %v", err)
+	}
+	got, err := store.DeviceByDevEUI(ctx, devEUI)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+
+	if got.Group != "cold-chain" {
+		t.Errorf("Group = %q, want cold-chain", got.Group)
+	}
+	if len(got.Attributes) != 2 || got.Attributes["line"] != "3" ||
+		got.Attributes["purpose"] != "cold store" {
+		t.Errorf("Attributes = %#v, want the two entries written", got.Attributes)
+	}
+	if got.Location == nil {
+		t.Fatal("Location = nil, want the position that was stored")
+	}
+	if got.Location.Latitude != 51.5074 || got.Location.Longitude != -0.1278 {
+		t.Errorf("coordinates = %v/%v, want 51.5074/-0.1278",
+			got.Location.Latitude, got.Location.Longitude)
+	}
+	// Altitude 14 rather than 0 is the point of this assertion: an int column
+	// scanned into a non-pointer would read 0 for a NULL and 0 for a real sea
+	// level, and the console could not tell them apart.
+	if got.Location.Altitude != 14 {
+		t.Errorf("Altitude = %d, want 14", got.Location.Altitude)
+	}
+
+	// A position without an altitude is legal in the schema and must read back
+	// as a position with a zero altitude, not as no position.
+	noAlt := mustEUI(t, fmt.Sprintf("00CD223344%06X", suffix))
+	dev2 := engine.NewOTAADevice(noAlt, mustEUI(t, "0102030405060708"),
+		mustKey(t, "2b7e151628aed2a6abf7158809cf4f3c"))
+	dev2.Location = &engine.Location{Latitude: 48.8566, Longitude: 2.3522}
+	if err := store.SaveDevice(ctx, dev2); err != nil {
+		t.Fatalf("SaveDevice (no altitude): %v", err)
+	}
+	got2, err := store.DeviceByDevEUI(ctx, noAlt)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI (no altitude): %v", err)
+	}
+	if got2.Location == nil {
+		t.Fatal("a position without an altitude must still be a position")
+	}
+	if got2.Location.Altitude != 0 {
+		t.Errorf("Altitude = %d, want 0", got2.Location.Altitude)
+	}
+
+	// No context at all: attributes must come back nil, not an empty map, so the
+	// API does not have to distinguish two spellings of "none".
+	bare := mustEUI(t, fmt.Sprintf("00CE223344%06X", suffix))
+	dev3 := engine.NewOTAADevice(bare, mustEUI(t, "0102030405060708"),
+		mustKey(t, "2b7e151628aed2a6abf7158809cf4f3c"))
+	if err := store.SaveDevice(ctx, dev3); err != nil {
+		t.Fatalf("SaveDevice (no context): %v", err)
+	}
+	got3, err := store.DeviceByDevEUI(ctx, bare)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI (no context): %v", err)
+	}
+	if got3.Attributes != nil {
+		t.Errorf("Attributes = %#v, want nil for a device with none", got3.Attributes)
+	}
+	if got3.Location != nil {
+		t.Errorf("Location = %+v, want nil for a device with no recorded position", got3.Location)
+	}
+
+	// Saving again replaces rather than merges. An operator who deletes an
+	// attribute in the console must not find it back on the next read, and
+	// clearing a position must actually clear it.
+	dev.Attributes = map[string]string{"line": "4"}
+	dev.Location = nil
+	if err := store.SaveDevice(ctx, dev); err != nil {
+		t.Fatalf("SaveDevice (replaced): %v", err)
+	}
+	gotAgain, err := store.DeviceByDevEUI(ctx, devEUI)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI (replaced): %v", err)
+	}
+	if len(gotAgain.Attributes) != 1 || gotAgain.Attributes["line"] != "4" {
+		t.Errorf("Attributes = %#v, want only {line:4}; the old entry survived", gotAgain.Attributes)
+	}
+	if gotAgain.Location != nil {
+		t.Errorf("Location = %+v, want nil after clearing", gotAgain.Location)
+	}
+}
+
+// TestDeviceContextSchemaConstraints exercises the migration's own guards with
+// raw SQL, bypassing the store.
+//
+// The API validates these too, but the constraints exist because a hand-edited
+// row or a future writer must not be able to store a latitude of 91 or half a
+// position. A CHECK that never fires is indistinguishable from a missing one, so
+// each is fired on purpose.
+func TestDeviceContextSchemaConstraints(t *testing.T) {
+	dsn := os.Getenv(dsnEnv)
+	if dsn == "" {
+		t.Skipf("%s is not set; skipping the PostgreSQL round trip", dsnEnv)
+	}
+	ctx := context.Background()
+
+	store, err := pgstore.Open(ctx, dsn)
+	if err != nil {
+		t.Fatalf("Open (connect + migrate): %v", err)
+	}
+	defer store.Close()
+
+	suffix := time.Now().UnixNano() % 0xFFFFFF
+	devEUI := fmt.Sprintf("00CF223344%06X", suffix)
+	joinEUI := fmt.Sprintf("%016X", suffix)
+
+	// A minimal row to hang the columns off; the constraints are what is under
+	// test, not the device. Keys are text columns with hex CHECKs, not bytea.
+	if _, err := store.Pool().Exec(ctx, `
+		INSERT INTO ns_devices (dev_eui, join_eui, app_key, name)
+		VALUES ($1, $2, '2B7E151628AED2A6ABF7158809CF4F3C', 'schema-probe')
+		ON CONFLICT (dev_eui) DO NOTHING`,
+		devEUI, joinEUI); err != nil {
+		t.Fatalf("insert the probe device: %v", err)
+	}
+	defer func() {
+		_, _ = store.Pool().Exec(ctx, `DELETE FROM ns_devices WHERE dev_eui = $1`, devEUI)
+	}()
+
+	cases := []struct {
+		name  string
+		set   string
+		valid bool
+	}{
+		// Ranges. Each case starts from a clean row, so one case's columns
+		// cannot change another's outcome.
+		{"a latitude past the pole is refused", `latitude = 91`, false},
+		{"a longitude past 180 is refused", `longitude = 181`, false},
+		{"an impossible altitude is refused",
+			`latitude = 51.5, longitude = -0.12, altitude = 99999`, false},
+		{"sea level is a legal altitude",
+			`latitude = 51.5, longitude = -0.12, altitude = 0`, true},
+		{"a below-sea-level altitude is legal",
+			`latitude = 51.5, longitude = -0.12, altitude = -200`, true},
+
+		// Completeness. A position is only meaningful as a pair, so neither
+		// coordinate nor altitude may arrive on its own. Altitude alone is the
+		// subtle one: it is a number that looks harmless in isolation and is
+		// meaningless without somewhere it belongs.
+		{"a latitude with no longitude is refused", `latitude = 51.5`, false},
+		{"a longitude with no latitude is refused", `longitude = -0.12`, false},
+		{"an altitude with no coordinates is refused", `altitude = 12`, false},
+		{"a full position is accepted", `latitude = 51.5, longitude = -0.12`, true},
+		{"a position with an altitude is accepted",
+			`latitude = 51.5, longitude = -0.12, altitude = 12`, true},
+
+		// Attribute shape, enforced by 010.
+		{"a non-object attribute is refused", `attributes = '["not","an","object"]'::jsonb`, false},
+		{"an attribute holding a number is refused", `attributes = '{"line":3}'::jsonb`, false},
+		{"a nested attribute is refused", `attributes = '{"a":{"b":"c"}}'::jsonb`, false},
+		{"an empty attribute object is accepted", `attributes = '{}'::jsonb`, true},
+		{"an object of strings is accepted", `attributes = '{"line":"3"}'::jsonb`, true},
+	}
+
+	for _, tc := range cases {
+		// Reset first: the position columns are constrained together, so
+		// leaving one set by the previous case would decide this one's outcome.
+		if _, err := store.Pool().Exec(ctx,
+			`UPDATE ns_devices SET latitude = NULL, longitude = NULL, altitude = NULL,
+			 attributes = '{}'::jsonb WHERE dev_eui = $1`, devEUI); err != nil {
+			t.Fatalf("reset the probe row: %v", err)
+		}
+		_, err := store.Pool().Exec(ctx,
+			`UPDATE ns_devices SET `+tc.set+` WHERE dev_eui = $1`, devEUI)
+		switch {
+		case tc.valid && err != nil:
+			t.Errorf("%s: rejected a legal value: %v", tc.name, err)
+		case !tc.valid && err == nil:
+			t.Errorf("%s: the schema accepted it", tc.name)
+		}
+	}
+}

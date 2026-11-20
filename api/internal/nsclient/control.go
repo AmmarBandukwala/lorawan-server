@@ -87,6 +87,18 @@ type DevicePatch struct {
 	MaxDataRate    *int    `json:"max_data_rate,omitempty"`
 	MinDataRate    *int    `json:"min_data_rate,omitempty"`
 	MaxTxPower     *int    `json:"max_tx_power,omitempty"`
+
+	// Attributes replaces the device's whole key/value map. A pointer so that
+	// "leave alone" and "there are none now" stay different: an empty map is a
+	// deliberate clearing, and a nil is silence.
+	Attributes *map[string]string `json:"attributes,omitempty"`
+
+	// Location is raw JSON for the same reason, with one complication: clearing a
+	// position means sending an explicit null, and a typed field cannot tell a
+	// null from an absent key. Marshalling json.RawMessage verbatim keeps the
+	// three cases distinct all the way to the network server, which is where the
+	// distinction is acted on.
+	Location json.RawMessage `json:"location,omitempty"`
 }
 
 // PatchDevice changes a device's operator-facing settings without touching its

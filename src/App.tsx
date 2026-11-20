@@ -6,10 +6,11 @@ import {
 import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
+import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from './features/network/Gateways'
 import { fetchRegions, fetchStatus, type NetworkStatus, type RegionList } from './features/network/control'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
-import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, transportLabel } from './features/network/constants'
-import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type View } from './features/network/types'
+import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, UNASSIGNED_GROUP } from './features/network/constants'
+import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type GroupFilter, type View } from './features/network/types'
 import './App.css'
 
 const navigation: { name: View; icon: typeof Activity }[] = [
@@ -27,6 +28,8 @@ function App() {
   const [settingsDraft, setSettingsDraft] = useState<FacilitySettings>(emptySettings)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<DeviceFilter>('all')
+  // 'all' means no group filter; any other value is a group label to match.
+  const [group, setGroup] = useState<GroupFilter>('all')
   const [showAdd, setShowAdd] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [connection, setConnection] = useState<ConnectionState>('loading')
@@ -127,11 +130,30 @@ function App() {
     }
   }, [refreshNetworkSnapshot])
 
+  // Devices grouped by the label an operator gave them. Grouping is a filter
+  // rather than a tree because a facility's organisation changes — a line is
+  // repurposed, a wing is added — and a device should move between groups by
+  // editing one field rather than being re-provisioned.
+  const deviceGroups = useMemo(() => {
+    const names = new Set(devices.map((device) => device.group).filter((name) => name && name !== UNASSIGNED_GROUP))
+    return [...names].sort()
+  }, [devices])
+
   const filteredDevices = useMemo(() => devices.filter((device) => {
     const matchesQuery = `${device.name} ${device.eui} ${device.group}`.toLowerCase().includes(query.toLowerCase())
     const matchesState = filter === 'all' || device.state === filter
-    return matchesQuery && matchesState
-  }), [devices, filter, query])
+    const matchesGroup = group === 'all' ||
+      (group === UNASSIGNED_GROUP ? !device.group || device.group === UNASSIGNED_GROUP : device.group === group)
+    return matchesQuery && matchesState && matchesGroup
+  }), [devices, filter, group, query])
+
+  // Inventory rows the network server has never heard from. Kept visible because
+  // "I registered three gateways and the list shows one" needs answering, but
+  // separated from the live ones so an unused row does not read as a broken one.
+  const unheardGateways = useMemo(() => gateways.filter(
+    (record) => !(status?.gateways ?? []).some(
+      (health) => health.gateway_eui.toUpperCase() === record.id.toUpperCase()),
+  ), [gateways, status])
 
   /**
    * What the dialog does after the network server accepts a device.
@@ -230,25 +252,48 @@ function App() {
               <article className="panel gateway-panel"><div className="panel-heading"><div><h2>Gateway health</h2><p>{overview.onlineGateways} online · {overview.gatewayCount} registered</p></div><button className="text-action" onClick={() => setView('Gateways')}>View all <ArrowUpRight size={14} /></button></div><div className="gateway-list">{gateways.slice(0, 3).map((gateway) => <Gateway key={gateway.id} gateway={gateway} />)}{gateways.length === 0 && <div className="empty-result">No gateways registered yet.</div>}</div><div className="gateway-footer"><span>Latest reception</span><b>{gateways[0]?.lastSeen ?? 'No radio traffic'}</b></div></article>
             </section>
 
-            <section className="panel device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} /><DeviceTable devices={filteredDevices.slice(0, 5)} /></section>
+            <section className="panel device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices.slice(0, 5)} /></section>
 
             <section className="bottom-grid"><article className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Latest network events</p></div><button className="text-action" onClick={() => setView('Events')}>All events <ArrowUpRight size={14} /></button></div><div className="activity-list">{events.slice(0, 3).map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></article><article className="panel downlink-panel"><div className="panel-heading"><div><h2>Downlink queue</h2><p>Scheduled device messages</p></div><ArrowDown size={16} className="muted-icon" /></div><div className="queue-empty"><div className="queue-icon"><Check size={18} /></div><b>{overview.queuedDownlinks === 0 ? 'Queue is clear' : `${overview.queuedDownlinks} messages queued`}</b><span>{overview.queuedDownlinks === 0 ? 'No pending downlinks' : 'Waiting for an eligible receive window'}</span></div><div className="queue-footer"><span>Last sent</span><b>{overview.lastDownlink} <span>·</span> {overview.sentDownlinks24h} in 24h</b></div></article></section>
           </>}
 
-          {view === 'Devices' && <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refreshNetworkSnapshot()} onDeleted={() => { setSelected(null); void refreshNetworkSnapshot() }} />}</div>}
-          {view === 'Gateways' && <section className="gateway-grid-full">
-            {gateways.map((gateway) => <GatewayCard key={gateway.id} gateway={gateway} health={status?.gateways.find((g) => g.gateway_eui.toUpperCase() === gateway.id.toUpperCase())} />)}
-            {gateways.length === 0 && <div className="panel empty-panel">{status && status.gateways.length > 0
-              ? 'Gateways are on the air but not registered in the inventory yet.'
-              : 'No gateways have been heard from. Point a packet forwarder at this server’s UDP port, or a Basics Station at its WebSocket endpoint, and it will appear here.'}</div>}
-            {/* Which transports are open is the first answer when a gateway will
-                not connect: a station aimed at a port that is not listening
-                fails silently, and this says so without reading server logs. */}
-            {status?.transports && status.transports.length > 0 && <div className="panel integration-panel"><div className="panel-heading"><div><h2>Listening for</h2><p>Gateway protocols this server accepts</p></div></div><div className="gateway-stats">{status.transports.map((transport) => <div key={transport}><span>{transportLabel(transport)}</span><b>open</b></div>)}</div></div>}
+          {view === 'Devices' && <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refreshNetworkSnapshot()} onDeleted={() => { setSelected(null); void refreshNetworkSnapshot() }} />}</div>}
+          {view === 'Gateways' && <div className="gateway-view">
+            {/* First on the page because it is what someone with a gateway in
+                their hands needs, and it was the one thing this view did not
+                have: gateways are not registered here, they arrive, so the
+                useful prompt is the endpoint to point them at. */}
+            <GatewayConnectPanel listeners={status?.listeners} transports={status?.transports} />
+
+            <section className="gateway-grid-full">
+              {/* Live presence leads. The network server is what hears the
+                  packets, so a gateway it has heard from exists regardless of
+                  whether anyone typed it into an inventory. */}
+              {(status?.gateways ?? []).map((health) => {
+                const record = gateways.find((g) => g.id.toUpperCase() === health.gateway_eui.toUpperCase())
+                // An inventory row adds the database's own aggregates, so the
+                // richer card is used when both views have something to say.
+                return record
+                  ? <GatewayCard key={health.gateway_eui} gateway={record} health={health} />
+                  : <LiveGatewayCard key={health.gateway_eui} health={health} region={status?.region ?? 'band unknown'} />
+              })}
+              {(status?.gateways ?? []).length === 0 && <div className="panel empty-panel">
+                {status
+                  ? 'No gateway has contacted this server yet. Configure one with the endpoint above — it appears here within about 30 seconds of its first packet.'
+                  : 'The network server is not reachable, so gateway presence is unknown. This is not the same as having no gateways.'}
+              </div>}
+            </section>
+
+            {unheardGateways.length > 0 && <section className="panel unheard-panel">
+              <div className="panel-heading"><div><h2>Registered, never heard from</h2>
+                <p>Inventory rows with no packets behind them</p></div></div>
+              {unheardGateways.map((gateway) => <UnheardGatewayRow key={gateway.id} name={gateway.name} id={gateway.id} onOpen={() => window.scrollTo({ top: 0, behavior: 'smooth' })} />)}
+            </section>}
+
             {status?.duty_cycle && <DutyCyclePanel usage={status.duty_cycle.usage} window={status.duty_cycle.window} denials={status.duty_cycle.denials} />}
             {status && status.integrations && <article className="panel integration-panel"><div className="panel-heading"><div><h2>Integrations</h2><p>{status.integrations.sinks.join(', ') || 'No sinks configured'}</p></div></div><div className="gateway-stats"><div><span>Delivered</span><b>{status.integrations.published.toLocaleString()}</b></div><div><span>Failed</span><b>{status.integrations.delivery_failures.toLocaleString()}</b></div><div><span>Dropped</span><b>{status.integrations.dropped.toLocaleString()}</b></div><div><span>In queue</span><b>{status.integrations.queued.toLocaleString()}</b></div></div>{status.integrations.dropped > 0 && <p className="form-error" role="alert">Events are being dropped: the queue is full, so a receiver is too slow or unreachable.</p>}</article>}
             {!status && <div className="panel integration-panel"><b>No health report from the network server.</b><span> Gateway presence, duty-cycle occupancy and integration counters need the network server reachable.</span></div>}
-          </section>}
+          </div>}
           {view === 'Events' && <section className="panel event-view"><div className="panel-heading"><div><h2>Network events</h2><p>Recent activity from your local network</p></div><span className="select-button">Most recent</span></div><div className="activity-list event-list">{events.map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></section>}
           {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} regions={regions?.regions ?? FALLBACK_REGIONS} regionsAreFallback={regions === null || regions.source === 'fallback'} />}
 

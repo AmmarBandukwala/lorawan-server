@@ -113,6 +113,29 @@ export type SubBandUsage = {
   transmits: number
 }
 
+/**
+ * One gateway-facing endpoint the network server has open.
+ *
+ * The console cannot invent these: NS_LBS_ADDR=off removes a transport entirely,
+ * so which endpoints exist is a fact about the running process and not about the
+ * build of the console.
+ */
+export type GatewayListener = {
+  /** "semtech-udp" or "basic-station", matching GatewayHealth.transport. */
+  transport: string
+  /** As configured, for example ":6858". */
+  bind_addr: string
+  port: number
+  /**
+   * True when the server bound every interface, which is the usual case. The
+   * gateway still needs a host the operator knows is reachable, so the console
+   * supplies the one it was loaded from and says that is what it did.
+   */
+  host_wildcard: boolean
+  /** Whether the endpoint authenticates the gateway that connects to it. */
+  secured: boolean
+}
+
 export type NetworkStatus = {
   uptime_seconds: number
   region: string
@@ -134,6 +157,17 @@ export type NetworkStatus = {
    * gateway fault.
    */
   transports?: string[]
+  /**
+   * Where each open transport is listening, so the console can tell an operator
+   * what to type into a gateway. `transports` says a protocol is reachable; this
+   * says on which port, which is the half that actually unblocks someone
+   * standing in front of the gateway.
+   *
+   * Optional because a network server older than this field reports the
+   * transports only; the connect panel then shows the protocol names without
+   * addresses rather than nothing at all.
+   */
+  listeners?: GatewayListener[]
   integrations?: {
     sinks: string[]
     published: number
@@ -284,6 +318,27 @@ export interface DeviceEdit {
   maxDataRate?: number
   minDataRate?: number
   maxTxPower?: number
+  /**
+   * Replaces the whole attribute map. An empty object is a deliberate clearing,
+   * which is why this cannot be expressed as "omit the field" — that already
+   * means "leave alone".
+   */
+  attributes?: Record<string, string>
+  /** An explicit null clears the stored position; undefined leaves it alone. */
+  location?: DeviceLocation | null
+}
+
+/** Where a device is installed. Altitude is metres above mean sea level. */
+export interface DeviceLocation {
+  latitude: number
+  longitude: number
+  altitude?: number
+}
+
+/** One attribute as an editor row. Order is the operator's, not the server's. */
+export interface AttributeRow {
+  key: string
+  value: string
 }
 
 /** The network server's view of a provisioned device. Keys are never included. */
@@ -300,6 +355,10 @@ export interface ProvisionedDevice {
   max_data_rate: number
   min_data_rate: number
   max_tx_power: number
+  /** Absent when the device carries none, rather than an empty object. */
+  attributes?: Record<string, string>
+  /** Absent when no position has been recorded — distinct from 0,0. */
+  location?: DeviceLocation
 }
 
 /**
@@ -323,6 +382,155 @@ export interface DeviceForm {
   supportsClassC: boolean
   /** Kept as text because a select or an empty field is not yet a number. */
   maxDataRate: string
+  /**
+   * Editor rows rather than a map, because a map has no order and a form needs
+   * one: rows are added, edited and removed by position, and re-rendering a
+   * device's tags in a different order on every keystroke reads as a bug.
+   */
+  attributes: AttributeRow[]
+  /** Text for the same reason as maxDataRate: blank must not become zero. */
+  latitude: string
+  longitude: string
+  altitude: string
+}
+
+/**
+ * Attribute rows as the map that gets stored, or a message when they cannot be
+ * one.
+ *
+ * Keys are lower-cased and trimmed here, matching the network server, so what the
+ * operator sees in the form is what comes back after a save. Leaving the
+ * normalisation to the server would make a saved device appear to have acquired
+ * different tags than the ones that were typed.
+ *
+ * Two rows that normalise to the same key are refused rather than collapsed:
+ * "Line" and "line " describing different things is a question only the operator
+ * can answer.
+ */
+export function attributeMap(rows: AttributeRow[]): { map?: Record<string, string>; problem?: string } {
+  const map: Record<string, string> = {}
+  for (const row of rows) {
+    const key = row.key.trim().toLowerCase()
+    const value = row.value.trim()
+    // A completely blank row is someone who pressed "Add" and moved on, not a
+    // tag they meant to store.
+    if (key === '' && value === '') continue
+    if (key === '') return { problem: 'An attribute needs a key, or remove the empty row.' }
+    if (!/^[a-z0-9_-]+$/.test(key)) {
+      return { problem: `“${key}” can only use letters, numbers, dash and underscore.` }
+    }
+    if (value === '') return { problem: `“${key}” has no value. Fill it in or remove the row.` }
+    if (key in map) return { problem: `“${key}” is listed twice.` }
+    map[key] = value
+  }
+  return { map }
+}
+
+/** Stored attributes as editor rows, in a stable order. */
+export function attributeRows(map: Record<string, string> | undefined): AttributeRow[] {
+  if (!map) return []
+  return Object.keys(map).sort().map((key) => ({ key, value: map[key] }))
+}
+
+/**
+ * Whether two attribute maps hold the same pairs.
+ *
+ * Object comparison would always report a change, because building the map from
+ * the form produces a new object every render.
+ */
+export function sameAttributes(
+  a: Record<string, string> | undefined,
+  b: Record<string, string>,
+): boolean {
+  const existing = a ?? {}
+  const existingKeys = Object.keys(existing)
+  if (existingKeys.length !== Object.keys(b).length) return false
+  return existingKeys.every((key) => existing[key] === b[key])
+}
+
+/** A position as form text, for loading a stored device into the editor. */
+export function locationFields(location: DeviceLocation | undefined): {
+  latitude: string
+  longitude: string
+  altitude: string
+} {
+  if (!location) return { latitude: '', longitude: '', altitude: '' }
+  return {
+    latitude: String(location.latitude),
+    longitude: String(location.longitude),
+    // An absent altitude must not render as "0": that is a real height, and
+    // showing it would invite the operator to save a height nobody measured.
+    altitude: location.altitude === undefined ? '' : String(location.altitude),
+  }
+}
+
+/** Whether a position matches what is stored, altitude included. */
+export function sameLocation(a: DeviceLocation, b: DeviceLocation): boolean {
+  return a.latitude === b.latitude && a.longitude === b.longitude &&
+    (a.altitude ?? null) === (b.altitude ?? null)
+}
+
+/**
+ * The position the form is asking for, or undefined for "no change".
+ *
+ * Three cases have to be told apart, and the empty-field case is the one that
+ * would otherwise go wrong: clearing all three boxes on a device that has a
+ * position means "remove it", which is an explicit null rather than silence.
+ * A half-typed position returns undefined so it cannot be sent — the caller
+ * shows locationProblem instead.
+ */
+export function positionFromForm(
+  form: DeviceForm,
+  stored: DeviceLocation | undefined,
+): DeviceLocation | null | undefined {
+  const lat = form.latitude.trim()
+  const long = form.longitude.trim()
+  const alt = form.altitude.trim()
+
+  if (lat === '' && long === '' && alt === '') {
+    return stored ? null : undefined
+  }
+  if (lat === '' || long === '') return undefined
+
+  const latitude = Number(lat)
+  const longitude = Number(long)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return undefined
+
+  const next: DeviceLocation = { latitude, longitude }
+  if (alt !== '') {
+    const altitude = Number(alt)
+    if (!Number.isFinite(altitude)) return undefined
+    next.altitude = altitude
+  }
+  if (stored && sameLocation(stored, next)) return undefined
+  return next
+}
+
+/**
+ * What is wrong with the position fields, in operator terms, or '' when they are
+ * usable.
+ *
+ * Ranges are checked here because a latitude of 91 does not mean anything, and
+ * finding that out after a round trip costs the operator the context of what they
+ * were typing.
+ */
+export function locationProblem(form: DeviceForm): string {
+  const lat = form.latitude.trim()
+  const long = form.longitude.trim()
+  const alt = form.altitude.trim()
+  if (lat === '' && long === '' && alt === '') return ''
+  if (lat === '' || long === '') return 'A position needs both a latitude and a longitude. Clear all three to remove it.'
+  const latitude = Number(lat)
+  const longitude = Number(long)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return 'Latitude and longitude must be numbers.'
+  if (latitude < -90 || latitude > 90) return 'Latitude must be between -90 and 90.'
+  if (longitude < -180 || longitude > 180) return 'Longitude must be between -180 and 180.'
+  if (alt !== '') {
+    const altitude = Number(alt)
+    if (!Number.isFinite(altitude)) return 'Altitude must be a number of metres.'
+    if (altitude < -1000 || altitude > 10000) return 'Altitude must be between -1000 and 10000 metres.'
+  }
+  return ''
 }
 
 /**
@@ -350,6 +558,14 @@ export function diffDeviceEdit(stored: ProvisionedDevice, form: DeviceForm): Dev
   const raw = form.maxDataRate.trim()
   const parsed = raw === '' ? Number.NaN : Number(raw)
   if (Number.isInteger(parsed) && parsed !== stored.max_data_rate) edit.maxDataRate = parsed
+
+  const { map, problem } = attributeMap(form.attributes)
+  // An unusable row set produces no edit at all rather than a partial one: the
+  // caller shows the problem and keeps the save button disabled.
+  if (!problem && map && !sameAttributes(stored.attributes, map)) edit.attributes = map
+
+  const position = positionFromForm(form, stored.location)
+  if (position !== undefined) edit.location = position
   return edit
 }
 
@@ -369,6 +585,15 @@ export function describeDeviceEdit(edit: DeviceEdit): string {
   if (edit.supportsClassC !== undefined) parts.push(edit.supportsClassC ? 'class C' : 'class A')
   if (edit.maxDataRate !== undefined) {
     parts.push(edit.maxDataRate === -1 ? 'data-rate limit lifted' : `limited to DR${edit.maxDataRate}`)
+  }
+  if (edit.attributes !== undefined) {
+    const count = Object.keys(edit.attributes).length
+    parts.push(count === 0 ? 'attributes cleared' : `${count} attribute${count === 1 ? '' : 's'}`)
+  }
+  if (edit.location !== undefined) {
+    parts.push(edit.location === null
+      ? 'position removed'
+      : `position ${edit.location.latitude.toFixed(5)}, ${edit.location.longitude.toFixed(5)}`)
   }
   if (parts.length === 0) return 'Saved.'
   const radio = parts.some((p) => p.includes('ADR') || p.includes('DR') || p.includes('class'))
@@ -392,6 +617,11 @@ export async function editDevice(devEUI: string, edit: DeviceEdit): Promise<Prov
   if (edit.maxDataRate !== undefined) body.max_data_rate = edit.maxDataRate
   if (edit.minDataRate !== undefined) body.min_data_rate = edit.minDataRate
   if (edit.maxTxPower !== undefined) body.max_tx_power = edit.maxTxPower
+  // Both are sent as-is, including an empty object and an explicit null: those
+  // are the clearing instructions, and dropping them would make a device's tags
+  // and position impossible to remove from the console.
+  if (edit.attributes !== undefined) body.attributes = edit.attributes
+  if (edit.location !== undefined) body.location = edit.location
   if (Object.keys(body).length === 0) {
     throw new Error('Nothing to save — no setting was changed.')
   }

@@ -1,14 +1,39 @@
 import type { FormEvent } from 'react'
 import {
   ArrowDown, ArrowUpRight, Check, ChevronDown, CircleCheck, Clock3, Radio,
-  RadioTower, Search, Settings2, TriangleAlert,
+  RadioTower, Search, TriangleAlert,
 } from 'lucide-react'
-import { DEVICE_FILTERS, LOW_BATTERY_PERCENT, SIGNAL_QUALITY, transportLabel } from './constants'
+import { DEVICE_FILTERS, LOW_BATTERY_PERCENT, SIGNAL_QUALITY, transportLabel, UNASSIGNED_GROUP } from './constants'
 import type { GatewayHealth } from './control'
-import type { Device, DeviceFilter, FacilitySettings, GatewayRecord, NetworkEvent, View } from './types'
+import type { Device, DeviceFilter, FacilitySettings, GatewayRecord, GroupFilter, NetworkEvent, View } from './types'
 
-export function DeviceHeader({ view, setView, query, setQuery, filter, setFilter }: { view: View; setView: (view: View) => void; query: string; setQuery: (query: string) => void; filter: DeviceFilter; setFilter: (filter: DeviceFilter) => void }) {
-  return <div className="device-header"><div className="panel-heading"><div><h2>{view === 'Devices' ? 'Device inventory' : 'Devices'}</h2><p>Most recently active end devices</p></div>{view !== 'Devices' && <button className="text-action" onClick={() => setView('Devices')}>View all <ArrowUpRight size={14} /></button>}</div><div className="table-tools"><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search devices" /></label><select aria-label="Filter devices by status" value={filter} onChange={(event) => setFilter(event.target.value as DeviceFilter)}>{DEVICE_FILTERS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select><button className="filter-button" aria-label="More filters"><Settings2 size={15} /></button></div></div>
+/**
+ * The device list's toolbar: search, status filter and group filter.
+ *
+ * The group dropdown is built from the groups that actually exist rather than a
+ * fixed list, and it also offers the unassigned bucket — the devices an operator
+ * has not organised yet are exactly the ones someone viewing groups wants to
+ * find, and leaving them out would make the counts not add up.
+ *
+ * The button this replaced was labelled "More filters" and did nothing, which is
+ * worse than no button at all: it taught people that nothing here responds.
+ */
+export function DeviceHeader({ view, setView, query, setQuery, filter, setFilter, group, setGroup, groups }: {
+  view: View
+  setView: (view: View) => void
+  query: string
+  setQuery: (query: string) => void
+  filter: DeviceFilter
+  setFilter: (filter: DeviceFilter) => void
+  group: GroupFilter
+  setGroup: (group: GroupFilter) => void
+  groups: string[]
+}) {
+  return <div className="device-header"><div className="panel-heading"><div><h2>{view === 'Devices' ? 'Device inventory' : 'Devices'}</h2><p>Most recently active end devices</p></div>{view !== 'Devices' && <button className="text-action" onClick={() => setView('Devices')}>View all <ArrowUpRight size={14} /></button>}</div><div className="table-tools"><label className="search-field"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search devices" /></label><select aria-label="Filter devices by status" value={filter} onChange={(event) => setFilter(event.target.value as DeviceFilter)}>{DEVICE_FILTERS.map(({ value, label }) => <option key={value} value={value}>{label}</option>)}</select><select aria-label="Filter devices by group" value={group} onChange={(event) => setGroup(event.target.value)}>
+  <option value="all">All groups</option>
+  {groups.map((name) => <option key={name} value={name}>{name}</option>)}
+  <option value={UNASSIGNED_GROUP}>{UNASSIGNED_GROUP}</option>
+</select></div></div>
 }
 
 /**

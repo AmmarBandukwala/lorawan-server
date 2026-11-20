@@ -5,7 +5,11 @@ import { FALLBACK_REGIONS } from '../src/features/network/constants'
 import { DeviceHeader, DeviceTable, GatewayCard, ActivityItem, SettingsForm } from '../src/features/network/components'
 import { DeviceConsole } from '../src/features/network/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/DeviceSettings'
-import { describeDeviceEdit, diffDeviceEdit, type ProvisionedDevice } from '../src/features/network/control'
+import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/Gateways'
+import {
+  attributeMap, attributeRows, describeDeviceEdit, diffDeviceEdit, locationFields, locationProblem,
+  type ProvisionedDevice,
+} from '../src/features/network/control'
 import { RegisterDeviceDialog } from '../src/features/network/RegisterDeviceDialog'
 import { DEVICE_FILTERS, UNASSIGNED_GROUP } from '../src/features/network/constants'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
@@ -36,12 +40,25 @@ checks.push(['App reports an unconfigured facility rather than crashing', shell.
 for (const { value, label } of DEVICE_FILTERS) {
   const html = renderToString(h(DeviceHeader, {
     view: 'Devices', setView: noop, query: '', setQuery: noop, filter: value, setFilter: noop,
+    group: 'all', setGroup: noop, groups: ['Cooling', 'Roof'],
   }))
   checks.push([`DeviceHeader renders filter=${value}`, html.includes(`>${label}</option>`)])
 }
 check('DeviceHeader marks the active filter', renderToString(h(DeviceHeader, {
   view: 'Devices', setView: noop, query: 'tank', setQuery: noop, filter: 'Needs attention', setFilter: noop,
+  group: 'all', setGroup: noop, groups: ['Cooling'],
 })), 'selected=""') // React marks the chosen option; presence proves the value bound
+
+// The group dropdown is built from the groups that exist, so it has to show both
+// what was passed in and the unassigned bucket — devices nobody has organised are
+// the ones someone filtering by group most needs to find.
+const headerHtml = renderToString(h(DeviceHeader, {
+  view: 'Devices', setView: noop, query: '', setQuery: noop, filter: 'all', setFilter: noop,
+  group: 'Roof', setGroup: noop, groups: ['Cooling', 'Roof'],
+}))
+check('DeviceHeader offers the groups it was given', headerHtml, '>Cooling</option>')
+check('DeviceHeader offers the unassigned bucket', headerHtml, `>${UNASSIGNED_GROUP}</option>`)
+assert('DeviceHeader marks the chosen group', headerHtml.includes('value="Roof" selected'))
 
 check('DeviceTable renders a device row', renderToString(h(DeviceTable, { devices: [device] })), 'AABBCCDDEEFF0011')
 check('DeviceTable renders its empty state', renderToString(h(DeviceTable, { devices: [] })), 'No devices')
@@ -105,10 +122,14 @@ const storedDevice: ProvisionedDevice = {
   enabled: true, activation: 'otaa', group: 'Cooling',
   disable_adr: true, supports_class_c: false,
   max_data_rate: 3, min_data_rate: -1, max_tx_power: -1,
+  attributes: { line: '3', purpose: 'cold store' },
+  location: { latitude: 51.5074, longitude: -0.1278, altitude: 12 },
 }
 const untouchedForm = {
   name: 'Tank 3', group: 'Cooling', enabled: true,
   disableAdr: true, supportsClassC: false, maxDataRate: '3',
+  attributes: attributeRows(storedDevice.attributes),
+  ...locationFields(storedDevice.location),
 }
 assert('an untouched form produces no edit at all', Object.keys(diffDeviceEdit(storedDevice, untouchedForm)).length === 0)
 
@@ -152,6 +173,63 @@ assert('lifting a limit is worded as lifting',
   describeDeviceEdit({ maxDataRate: -1 }).includes('limit lifted'))
 assert('an empty edit still reads as a confirmation', describeDeviceEdit({}) === 'Saved.')
 
+// Device context: attributes and position. These are the fields most likely to be
+// mistyped and the least likely to be checked by anything else, so the pure logic
+// is asserted directly.
+assert('attribute rows round-trip into a map',
+  JSON.stringify(attributeMap(attributeRows(storedDevice.attributes)).map) ===
+  JSON.stringify({ line: '3', purpose: 'cold store' }))
+assert('attribute keys are lower-cased and trimmed',
+  attributeMap([{ key: ' Line ', value: '3' }]).map?.line === '3')
+assert('a blank row is not stored', Object.keys(attributeMap([{ key: '', value: '' }]).map ?? {}).length === 0)
+assert('a key with no value is refused', attributeMap([{ key: 'line', value: '  ' }]).problem !== undefined)
+assert('a key with spaces is refused', attributeMap([{ key: 'rooftop antenna', value: '1' }]).problem !== undefined)
+assert('two rows that normalise to one key are refused rather than merged',
+  attributeMap([{ key: 'Line', value: '3' }, { key: 'line', value: '4' }]).problem !== undefined)
+
+assert('an unchanged attribute set produces no edit',
+  diffDeviceEdit(storedDevice, untouchedForm).attributes === undefined)
+assert('editing one value sends the whole map',
+  diffDeviceEdit(storedDevice, {
+    ...untouchedForm, attributes: [{ key: 'line', value: '4' }, { key: 'purpose', value: 'cold store' }],
+  }).attributes?.line === '4')
+assert('removing every attribute is an explicit clearing, not silence',
+  diffDeviceEdit(storedDevice, { ...untouchedForm, attributes: [] }).attributes !== undefined &&
+  Object.keys(diffDeviceEdit(storedDevice, { ...untouchedForm, attributes: [] }).attributes ?? {}).length === 0)
+assert('an unusable attribute row produces no attribute edit',
+  diffDeviceEdit(storedDevice, { ...untouchedForm, attributes: [{ key: 'bad key', value: 'x' }] }).attributes === undefined)
+
+// Position. The three cases the form has to distinguish are a change, a clearing
+// and a half-typed entry that must never reach the network.
+assert('an unchanged position produces no edit', diffDeviceEdit(storedDevice, untouchedForm).location === undefined)
+assert('moving the device sends a position',
+  diffDeviceEdit(storedDevice, { ...untouchedForm, latitude: '51.51' }).location?.latitude === 51.51)
+assert('clearing all three fields on a placed device removes the position',
+  diffDeviceEdit(storedDevice, { ...untouchedForm, latitude: '', longitude: '', altitude: '' }).location === null)
+assert('a device with no position and empty fields sends nothing',
+  diffDeviceEdit({ ...storedDevice, location: undefined }, {
+    ...untouchedForm, latitude: '', longitude: '', altitude: '',
+  }).location === undefined)
+assert('a latitude without a longitude is not sent',
+  diffDeviceEdit(storedDevice, { ...untouchedForm, longitude: '' }).location === undefined)
+assert('a latitude without a longitude is explained',
+  locationProblem({ ...untouchedForm, longitude: '' }).includes('both'))
+assert('an out-of-range latitude is refused',
+  locationProblem({ ...untouchedForm, latitude: '91' }).includes('-90 and 90'))
+assert('a valid position reports no problem', locationProblem(untouchedForm) === '')
+// An absent altitude must not render as 0, which is a real height.
+assert('a position without an altitude leaves the box blank',
+  locationFields({ latitude: 1, longitude: 2 }).altitude === '')
+assert('an altitude of zero is shown as zero, not blank',
+  locationFields({ latitude: 1, longitude: 2, altitude: 0 }).altitude === '0')
+
+assert('clearing attributes is worded as clearing',
+  describeDeviceEdit({ attributes: {} }).includes('attributes cleared'))
+assert('a new position is described with its coordinates',
+  describeDeviceEdit({ location: { latitude: 51.5, longitude: -0.12 } }).includes('51.50000'))
+assert('removing a position is worded as removing',
+  describeDeviceEdit({ location: null }).includes('position removed'))
+
 // The panels themselves. Effects do not run under renderToString, so these
 // assert the initial render rather than fetched data.
 const settingsHtml = renderToString(h(DeviceSettings, {
@@ -160,6 +238,43 @@ const settingsHtml = renderToString(h(DeviceSettings, {
 check('DeviceSettings renders its loading state first', settingsHtml, 'Reading the device settings')
 assert('DeviceSettings withholds the save button until it has the values',
   !settingsHtml.includes('Save 1 change'))
+
+// The gateway connect panel: the endpoint is the point of it, so both transports
+// must appear with their ports, and the UDP one has to say it is unauthenticated
+// rather than let someone assume the port is safe to expose.
+const connectHtml = renderToString(h(GatewayConnectPanel, {
+  listeners: [
+    { transport: 'semtech-udp', bind_addr: ':6858', port: 6858, host_wildcard: true, secured: false },
+    { transport: 'basic-station', bind_addr: ':30001', port: 30001, host_wildcard: false, secured: true },
+  ],
+}))
+check('GatewayConnectPanel shows the UDP port', connectHtml, '6858')
+check('GatewayConnectPanel shows the station endpoint', connectHtml, '30001/updates')
+check('GatewayConnectPanel names both transports', connectHtml, 'Basics Station')
+check('GatewayConnectPanel warns that UDP is unauthenticated', connectHtml, 'claim a gateway EUI')
+check('GatewayConnectPanel says a gateway registers itself', connectHtml, 'nothing to register first')
+// A server that binds every interface cannot know which address the gateway
+// reaches it on, and the panel has to admit it substituted one.
+check('GatewayConnectPanel flags a substituted host', connectHtml, 'loaded from')
+// A station endpoint that authenticates must not inherit the UDP warning.
+assert('a secured endpoint does not warn about claiming gateways',
+  !connectHtml.split('Basics Station')[1]?.includes('claim a gateway EUI'))
+// With no listeners at all the panel must not invent an endpoint.
+check('GatewayConnectPanel says so when nothing is reporting',
+  renderToString(h(GatewayConnectPanel, { listeners: [] })), 'not reported')
+
+const liveHtml = renderToString(h(LiveGatewayCard, {
+  region: 'EU868',
+  health: {
+    gateway_eui: 'AA55555555555555', transport: 'semtech-udp', protocol: 'semtech-udp v2',
+    address: '192.168.1.40:44211', online: true, last_seen: '2026-11-17T10:00:00Z', packets: 120,
+    downlinks_sent: 7, downlink_errors: 2, downlinks_confirmed: 5, downlinks_unconfirmed: 2,
+    last_tx_ack_error: 'TOO_LATE', rx_received: 90, rx_ok: 88,
+  },
+}))
+check('LiveGatewayCard shows the gateway EUI', liveHtml, 'AA55555555555555')
+check('LiveGatewayCard reports a refused downlink', liveHtml, 'TOO_LATE')
+check('LiveGatewayCard shows the transport', liveHtml, 'UDP forwarder')
 
 // The console starts in its loading state — the session read happens in an
 // effect, which renderToString does not run — and the settings panel is offered

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
@@ -29,15 +30,20 @@ type statusServer struct {
 	routers *gateway.Router
 	eng     *engine.Engine
 	integr  *integration.Dispatcher // nil when no endpoints are configured
-	started time.Time
-	http    *http.Server
+	// listeners describes the gateway-facing endpoints, built from the process
+	// configuration at startup. It is passed in rather than read from the router
+	// because the router knows which transports exist and not what they bound.
+	listeners []listenerView
+	started   time.Time
+	http      *http.Server
 }
 
 func newStatusServer(addr string, log *slog.Logger, routers *gateway.Router, eng *engine.Engine,
-	integr *integration.Dispatcher) *statusServer {
+	integr *integration.Dispatcher, listeners []listenerView) *statusServer {
 
 	s := &statusServer{
-		addr: addr, log: log, routers: routers, eng: eng, integr: integr, started: time.Now(),
+		addr: addr, log: log, routers: routers, eng: eng, integr: integr,
+		listeners: listeners, started: time.Now(),
 	}
 
 	mux := http.NewServeMux()
@@ -133,6 +139,9 @@ type statusView struct {
 	// "basic-station" is absent, the port is simply not open, which is a
 	// configuration answer rather than a gateway fault.
 	Transports []string `json:"transports"`
+	// Listeners gives the address and port of each enabled transport, which is
+	// what a console needs to tell someone what to type into the gateway.
+	Listeners []listenerView `json:"listeners,omitempty"`
 	// Integrations reports the webhook dispatcher's counters, or nil when no
 	// endpoints are configured. A dropped count that keeps growing is the signal
 	// that a receiver is too slow, and this is where an operator sees it.
@@ -148,6 +157,65 @@ type dutyCycleView struct {
 	Window  string                `json:"window"`
 	Usage   []engine.SubBandUsage `json:"usage"`
 	Denials map[string]uint64     `json:"denials"`
+}
+
+// listenerView describes one gateway-facing endpoint this process is listening
+// on, and it exists for one reason: the console has to tell an operator what to
+// type into the gateway.
+//
+// A gateway is not added from this console — it announces itself, and inventing a
+// "register gateway" form would produce a record of a gateway that cannot reach
+// the server while the real one keeps failing to connect. What actually unblocks
+// someone standing at a gateway with a serial console is the endpoint and the
+// transport it speaks, so both are published rather than left to be guessed from
+// a log line.
+//
+// The JSON shape is the contract; the type itself stays unexported because this
+// is package main and nothing imports it. Only this process knows which
+// transports it opened — NS_LBS_ADDR=off removes one — and a console that
+// assumed both would send an operator to configure a station against a port
+// nobody is listening on.
+type listenerView struct {
+	// Transport is "semtech-udp" or "basic-station", matching the transport field
+	// on each gateway so an operator can match a discovered gateway back to the
+	// endpoint it used.
+	Transport string `json:"transport"`
+	// BindAddr is the address as configured, for example ":6858".
+	BindAddr string `json:"bind_addr"`
+	// Port is the numeric port, which is the one field a gateway configuration
+	// form always asks for.
+	Port int `json:"port"`
+	// HostWildcard is true when the bind address carries no host part, meaning
+	// the server accepts connections on any of its interfaces. The console then
+	// has to supply the host itself — the gateway needs an address the operator
+	// knows is reachable, and a wildcard says nothing about which that is.
+	HostWildcard bool `json:"host_wildcard"`
+	// Secured reports whether this endpoint authenticates the gateway. The UDP
+	// transport does not (the protocol has no credential to carry), which the
+	// console should say out loud rather than let someone assume.
+	Secured bool `json:"secured"`
+}
+
+// newListenerView builds the view for one endpoint. secured says whether the
+// endpoint authenticates the gateway, which differs per transport and is decided
+// by the caller because only it knows whether a token was configured.
+func newListenerView(transport, bindAddr string, secured bool) listenerView {
+	host, portStr, err := net.SplitHostPort(bindAddr)
+	if err != nil {
+		// Not in host:port form — an operator may have written just a port.
+		// Report it as a wildcard host with an unknown port rather than dropping
+		// the endpoint from the view, since "the server is listening somewhere"
+		// is still worth knowing.
+		return listenerView{Transport: transport, BindAddr: bindAddr, HostWildcard: true}
+	}
+	port, _ := strconv.Atoi(portStr)
+	return listenerView{
+		Transport:    transport,
+		BindAddr:     bindAddr,
+		Port:         port,
+		HostWildcard: host == "" || host == "0.0.0.0" || host == "::" || host == "*",
+		Secured:      secured,
+	}
 }
 
 type integrationView struct {
@@ -221,6 +289,7 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		GatewaysOnline:   online,
 		Gateways:         views,
 		Transports:       s.routers.Names(),
+		Listeners:        s.listeners,
 		SupportedRegions: region.Names(),
 	}
 	if s.integr != nil {

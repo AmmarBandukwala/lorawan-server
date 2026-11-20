@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -39,6 +40,17 @@ type deviceView struct {
 	MaxDataRate int    `json:"max_data_rate"`
 	MinDataRate int    `json:"min_data_rate"`
 	MaxTxPower  int    `json:"max_tx_power"`
+
+	// Attributes and Location are operator context: what the device is for and
+	// where it sits. The engine never reads either, and they are the only fields
+	// on this view a device's own behaviour cannot influence, which is why the
+	// console's device page is built around them.
+	//
+	// Both are omitted when empty rather than rendered as {} or 0,0: an empty
+	// object and a null position are different things to show a person, and a
+	// coordinate pair of 0,0 would plot the device in the Gulf of Guinea.
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Location   *engine.Location  `json:"location,omitempty"`
 }
 
 func newDeviceView(d *engine.Device) deviceView {
@@ -54,6 +66,8 @@ func newDeviceView(d *engine.Device) deviceView {
 		MaxDataRate: d.MaxDataRate,
 		MinDataRate: d.MinDataRate,
 		MaxTxPower:  d.MaxTxPower,
+		Attributes:  d.Attributes,
+		Location:    d.Location,
 	}
 	if !d.OTAA {
 		v.Activation = "abp"
@@ -89,6 +103,52 @@ type provisionDeviceRequest struct {
 	// Group is a dashboard label. The engine ignores it, but it belongs to the
 	// device row so a device is not split across two tables.
 	Group string `json:"group"`
+
+	// Attributes are operator-defined key/value pairs describing what the device
+	// is for. Keys are lower-cased and trimmed for the caller; see
+	// engine.NormalizeAttributes for the limits.
+	Attributes map[string]string `json:"attributes"`
+
+	// Location is where the device is installed. Omitting it means "no position
+	// recorded", which is stored as SQL NULL rather than as 0,0.
+	Location *locationRequest `json:"location"`
+}
+
+// locationRequest is the wire form of a device position.
+//
+// The fields are pointers so that "not sent" is distinguishable from "sent as
+// zero". Decoding straight into engine.Location would default a missing
+// longitude to 0, and a request carrying only a latitude would then store a
+// device at 51.5N 0E — a plausible-looking position in the wrong place, which is
+// worse than no position at all. Both coordinates must arrive together;
+// altitude alone is fine to omit, since a height is genuinely optional.
+type locationRequest struct {
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	Altitude  *int     `json:"altitude"`
+}
+
+// toLocation converts the request form, requiring a complete pair of
+// coordinates. The returned error is already phrased for the response body.
+func (l *locationRequest) toLocation() (*engine.Location, error) {
+	if l == nil {
+		return nil, nil
+	}
+	if l.Latitude == nil || l.Longitude == nil {
+		return nil, errors.New("location needs both latitude and longitude; altitude is optional")
+	}
+	return engine.NormalizeLocation(&engine.Location{
+		Latitude:  *l.Latitude,
+		Longitude: *l.Longitude,
+		Altitude:  derefOrZero(l.Altitude),
+	})
+}
+
+func derefOrZero(v *int) int {
+	if v == nil {
+		return 0
+	}
+	return *v
 }
 
 // maxNameLen bounds the free-text label. It is display data, but an unbounded
@@ -190,6 +250,21 @@ func decodeDeviceRequest(w http.ResponseWriter, r *http.Request) (*engine.Device
 	}
 	dev.DisableADR = req.DisableADR
 	dev.SupportsClassC = req.SupportsClassC
+
+	// Operator context last, so a bad attribute or coordinate is reported after
+	// the credentials and identifiers that matter more.
+	attrs, err := engine.NormalizeAttributes(req.Attributes)
+	if err != nil {
+		badRequest(w, strings.TrimPrefix(err.Error(), "engine: "))
+		return nil, false
+	}
+	dev.Attributes = attrs
+	loc, err := req.Location.toLocation()
+	if err != nil {
+		badRequest(w, strings.TrimPrefix(err.Error(), "engine: "))
+		return nil, false
+	}
+	dev.Location = loc
 	return dev, true
 }
 
@@ -338,6 +413,35 @@ type patchDeviceRequest struct {
 	MaxDataRate    *int    `json:"max_data_rate"`
 	MinDataRate    *int    `json:"min_data_rate"`
 	MaxTxPower     *int    `json:"max_tx_power"`
+
+	// Attributes replaces the whole map rather than merging into it. A merge
+	// would need a way to delete one key, and a console that sends the map it is
+	// displaying is simpler to reason about than one that has to compute a
+	// diff. An empty object therefore means "no attributes".
+	Attributes *map[string]string `json:"attributes"`
+
+	// Location replaces the position. Raw JSON because the three cases have to
+	// be told apart: absent means leave alone, null means clear, an object means
+	// set. A *locationRequest field would read the first two as the same nil.
+	Location json.RawMessage `json:"location"`
+}
+
+// wasSent reports whether the location field appeared in the body at all.
+func (p patchDeviceRequest) locationSent() bool { return len(p.Location) > 0 }
+
+// isNull reports an explicit "null", which is how a client clears a position.
+func (p patchDeviceRequest) isNull() bool {
+	return p.locationSent() && string(p.Location) == "null"
+}
+
+// decodeLocation converts the location field into a position. It must only be
+// called when locationSent and not locationIsNull.
+func (p patchDeviceRequest) decodeLocation() (*engine.Location, error) {
+	var req locationRequest
+	if err := json.Unmarshal(p.Location, &req); err != nil {
+		return nil, fmt.Errorf("location must be an object of latitude, longitude and altitude: %w", err)
+	}
+	return req.toLocation()
 }
 
 // handlePatchDevice serves PATCH /api/v1/devices/{dev_eui}.
@@ -450,6 +554,23 @@ func applyDevicePatch(dev *engine.Device, req patchDeviceRequest) string {
 	if next.MinDataRate != engine.UseRegionDefault && next.MaxDataRate != engine.UseRegionDefault &&
 		next.MinDataRate > next.MaxDataRate {
 		return "min_data_rate must not exceed max_data_rate"
+	}
+	if req.Attributes != nil {
+		attrs, err := engine.NormalizeAttributes(*req.Attributes)
+		if err != nil {
+			return strings.TrimPrefix(err.Error(), "engine: ")
+		}
+		next.Attributes = attrs
+	}
+	switch {
+	case req.isNull():
+		next.Location = nil
+	case req.locationSent():
+		loc, err := req.decodeLocation()
+		if err != nil {
+			return strings.TrimPrefix(err.Error(), "engine: ")
+		}
+		next.Location = loc
 	}
 	*dev = next
 	return ""

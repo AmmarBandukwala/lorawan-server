@@ -19,6 +19,13 @@ export type ConnectionState = 'loading' | 'connected' | 'degraded' | 'offline'
  * change without touching filtering.
  */
 export type DeviceFilter = 'all' | DeviceState
+
+/**
+ * The group filter. Unlike the status filter this one cannot be a closed set:
+ * groups are whatever labels operators have typed, so the value is either 'all'
+ * or an arbitrary string, and the dropdown is built from the devices themselves.
+ */
+export type GroupFilter = 'all' | string
 export type View = 'Overview' | 'Devices' | 'Gateways' | 'Events' | 'Settings'
 
 export const emptyOverview: Overview = {

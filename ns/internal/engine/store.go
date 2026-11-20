@@ -85,6 +85,16 @@ type Device struct {
 	Rx2FrequencyHz uint32
 
 	SupportsClassC bool
+
+	// Attributes is operator-defined context — what the device is for, which
+	// line or room it belongs to. The engine never reads it. Keys are
+	// normalised by NormalizeAttributes, and nil means "none" rather than the
+	// empty map, so the API can omit the field.
+	Attributes map[string]string
+
+	// Location is where the device is installed. nil means no position has been
+	// recorded, which is a different fact from a position at 0,0.
+	Location *Location
 }
 
 // NewOTAADevice returns an enabled OTAA device with regional defaults.

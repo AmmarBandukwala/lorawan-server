@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -14,7 +15,8 @@ import (
 const deviceColumns = `dev_eui, join_eui, name, enabled, activation_mode, app_key,
 	COALESCE(dev_addr, ''), nwk_s_key, app_s_key, next_join_nonce, used_dev_nonces,
 	max_data_rate, min_data_rate, max_tx_power, rx1_delay, rx2_data_rate,
-	rx2_frequency_hz, supports_class_c, disable_adr, device_group`
+	rx2_frequency_hz, supports_class_c, disable_adr, device_group,
+	attributes, latitude, longitude, altitude`
 
 // DeviceByDevEUI implements engine.DeviceRepo.
 func (s *Store) DeviceByDevEUI(ctx context.Context, devEUI lorawan.EUI64) (*engine.Device, error) {
@@ -39,8 +41,12 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 		appKey, nwkSKey  string
 		appSKey, devAddr string
 		nonces           []byte
+		attrs            []byte
 		rx2FrequencyHz   int64
 		nextJoinNonce    int64
+		latitude         *float64
+		longitude        *float64
+		altitude         *int32
 		err              error
 	)
 
@@ -49,6 +55,7 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 		&devAddr, &nwkSKey, &appSKey, &nextJoinNonce, &nonces,
 		&d.MaxDataRate, &d.MinDataRate, &d.MaxTxPower, &d.Rx1Delay, &d.Rx2DataRate,
 		&rx2FrequencyHz, &d.SupportsClassC, &d.DisableADR, &d.Group,
+		&attrs, &latitude, &longitude, &altitude,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, engine.ErrNotFound
@@ -78,10 +85,64 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 	if d.UsedDevNonces, err = devNoncesFromJSON(nonces); err != nil {
 		return nil, err
 	}
+	if d.Attributes, err = attributesFromJSON(attrs); err != nil {
+		return nil, err
+	}
+	// A position is only assembled when both coordinates are present. The
+	// migration permits a latitude without an altitude but not a latitude
+	// without a longitude; reading a half-written row as a position would place
+	// a device somewhere it is not.
+	if latitude != nil && longitude != nil {
+		loc := engine.Location{Latitude: *latitude, Longitude: *longitude}
+		if altitude != nil {
+			loc.Altitude = int(*altitude)
+		}
+		d.Location = &loc
+	}
 	d.OTAA = activationMode == "OTAA"
 	d.NextJoinNonce = uint32(nextJoinNonce)
 	d.Rx2FrequencyHz = uint32(rx2FrequencyHz)
 	return &d, nil
+}
+
+// attributesFromJSON decodes the attributes column. An empty object becomes nil
+// rather than an empty map, so "no attributes" has one representation and the API
+// can omit the field instead of emitting `{}` for every device.
+func attributesFromJSON(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out map[string]string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("pgstore: device attributes: %w", err)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// attributesJSON encodes the attributes column. nil becomes an empty object,
+// which is what the column's default and CHECK expect.
+func attributesJSON(attrs map[string]string) (string, error) {
+	if len(attrs) == 0 {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(attrs)
+	if err != nil {
+		return "", fmt.Errorf("pgstore: encode device attributes: %w", err)
+	}
+	return string(raw), nil
+}
+
+// locationArgs returns the three position columns for a device, with nil meaning
+// SQL NULL. Altitude is stored NULL when there is no position at all, so a row
+// never carries an altitude that belongs to no place.
+func locationArgs(loc *engine.Location) (lat, long, alt any) {
+	if loc == nil {
+		return nil, nil, nil
+	}
+	return loc.Latitude, loc.Longitude, loc.Altitude
 }
 
 // SaveDevice implements engine.DeviceRepo, inserting or fully updating the row.
@@ -95,6 +156,11 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 	if d.OTAA {
 		activationMode = "OTAA"
 	}
+	attrs, err := attributesJSON(d.Attributes)
+	if err != nil {
+		return err
+	}
+	lat, long, alt := locationArgs(d.Location)
 	// An OTAA device that has not joined yet has no address; storing NULL keeps
 	// the UNIQUE constraint meaningful (several unjoined devices must not all
 	// claim "00000000").
@@ -108,10 +174,12 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 			dev_eui, join_eui, name, enabled, activation_mode, app_key,
 			dev_addr, nwk_s_key, app_s_key, next_join_nonce, used_dev_nonces,
 			max_data_rate, min_data_rate, max_tx_power, rx1_delay, rx2_data_rate,
-			rx2_frequency_hz, supports_class_c, disable_adr, device_group, updated_at)
+			rx2_frequency_hz, supports_class_c, disable_adr, device_group,
+			attributes, latitude, longitude, altitude, updated_at)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-			$12, $13, $14, $15, $16, $17, $18, $19, $20, now())
+			$12, $13, $14, $15, $16, $17, $18, $19, $20,
+			$21::jsonb, $22, $23, $24, now())
 		ON CONFLICT (dev_eui) DO UPDATE SET
 			join_eui          = EXCLUDED.join_eui,
 			name              = EXCLUDED.name,
@@ -132,11 +200,16 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 			supports_class_c  = EXCLUDED.supports_class_c,
 			disable_adr       = EXCLUDED.disable_adr,
 			device_group      = EXCLUDED.device_group,
+			attributes        = EXCLUDED.attributes,
+			latitude          = EXCLUDED.latitude,
+			longitude         = EXCLUDED.longitude,
+			altitude          = EXCLUDED.altitude,
 			updated_at        = now()`,
 		euiText(d.DevEUI), euiText(d.JoinEUI), d.Name, d.Enabled, activationMode, keyText(d.AppKey),
 		devAddr, keyText(d.NwkSKey), keyText(d.AppSKey), int64(d.NextJoinNonce), string(nonces),
 		d.MaxDataRate, d.MinDataRate, d.MaxTxPower, d.Rx1Delay, d.Rx2DataRate,
 		int64(d.Rx2FrequencyHz), d.SupportsClassC, d.DisableADR, d.Group,
+		attrs, lat, long, alt,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore: save device: %w", err)

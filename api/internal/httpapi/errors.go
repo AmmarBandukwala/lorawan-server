@@ -80,6 +80,21 @@ const (
 	// One code rather than three, because the fix is identical.
 	ErrDataRateOutOfRange = "data_rate_or_tx_power_must_be_minus_1_or_0_to_15"
 	ErrDataRateOrder      = "min_data_rate_must_not_exceed_max_data_rate"
+
+	// Device context rejections: operator attributes and installed position.
+	//
+	// The network server validates these too. Repeating it here is not
+	// duplication for its own sake — a rejection that names the field costs one
+	// request instead of a round trip to a service that then reports the same
+	// thing in its own words.
+	ErrTooManyAttributes = "at_most_32_attributes_per_device"
+	ErrAttributeKey      = "attribute_keys_use_letters_digits_dash_or_underscore"
+	ErrAttributeValue    = "attribute_values_must_not_be_empty_or_over_200_characters"
+	// ErrLocationIncomplete catches the half-typed position. It gets its own code
+	// rather than a range error because the fix is different: one more number to
+	// type, not a number to correct.
+	ErrLocationIncomplete = "location_needs_both_latitude_and_longitude"
+	ErrLocationRange      = "latitude_longitude_or_altitude_out_of_range"
 )
 
 // Input limits. Each is enforced here and mirrored by the database schema; the
@@ -94,6 +109,14 @@ const (
 	// MaxOperatorRoleLen and MaxGroupLen bound shorter labels.
 	MaxOperatorRoleLen = 80
 	MaxGroupLen        = 60
+
+	// Device context limits. These mirror engine.MaxAttributes,
+	// MaxAttributeKeyLen and MaxAttributeValueLen in the ns module; the two
+	// modules share no package, so the values are repeated here and pinned by
+	// tests on both sides.
+	MaxAttributes        = 32
+	MaxAttributeKeyLen   = 40
+	MaxAttributeValueLen = 200
 
 	// HexDigits are the on-wire widths of the identifiers, in hexadecimal digits:
 	// 64-bit EUIs and a 128-bit AppKey.

@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -270,6 +271,70 @@ type editDeviceRequest struct {
 	MaxDataRate    *int    `json:"max_data_rate"`
 	MinDataRate    *int    `json:"min_data_rate"`
 	MaxTxPower     *int    `json:"max_tx_power"`
+
+	// Attributes and Location carry operator context. Location is raw JSON so an
+	// explicit null (clear the position) survives the relay; a typed field would
+	// read it as "not sent" and the position would be undeletable from the UI.
+	Attributes *map[string]string `json:"attributes"`
+	Location   json.RawMessage    `json:"location"`
+}
+
+// validateAttributes checks an attribute map against the same rules the network
+// server applies, returning the code to report. Keys are checked in their
+// trimmed form because that is what gets stored — the server lower-cases them.
+func validateAttributes(attrs *map[string]string) string {
+	if attrs == nil {
+		return ""
+	}
+	if len(*attrs) > MaxAttributes {
+		return ErrTooManyAttributes
+	}
+	for key, value := range *attrs {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" || utf8.RuneCountInString(trimmed) > MaxAttributeKeyLen ||
+			!attributeKeyPattern.MatchString(trimmed) {
+			return ErrAttributeKey
+		}
+		if v := strings.TrimSpace(value); v == "" || utf8.RuneCountInString(v) > MaxAttributeValueLen {
+			return ErrAttributeValue
+		}
+	}
+	return ""
+}
+
+// attributeKeyPattern is the canonical key form. Spaces and punctuation beyond
+// dash and underscore are refused rather than silently dropped, because a key
+// that renders as "rooftop antenna?" next to "rooftop_antenna" is a second tag
+// describing one thing.
+var attributeKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// locationFields is the wire shape of a position, with pointers so a missing
+// coordinate is not mistaken for a zero one.
+type locationFields struct {
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	Altitude  *int     `json:"altitude"`
+}
+
+// validateLocation checks a location field, which may be absent, an explicit
+// null, or an object. Only the object carries anything to check.
+func validateLocation(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var fields locationFields
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return ErrLocationIncomplete
+	}
+	if fields.Latitude == nil || fields.Longitude == nil {
+		return ErrLocationIncomplete
+	}
+	if *fields.Latitude < -90 || *fields.Latitude > 90 ||
+		*fields.Longitude < -180 || *fields.Longitude > 180 ||
+		(fields.Altitude != nil && (*fields.Altitude < -1000 || *fields.Altitude > 10000)) {
+		return ErrLocationRange
+	}
+	return ""
 }
 
 // updateDevice relays a metadata edit to the network server, which owns the
@@ -304,8 +369,17 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 
 	if input.Name == nil && input.Group == nil && input.Enabled == nil &&
 		input.DisableADR == nil && input.SupportsClassC == nil &&
-		input.MaxDataRate == nil && input.MinDataRate == nil && input.MaxTxPower == nil {
+		input.MaxDataRate == nil && input.MinDataRate == nil && input.MaxTxPower == nil &&
+		input.Attributes == nil && len(input.Location) == 0 {
 		writeError(w, http.StatusBadRequest, ErrNoFieldsToChange)
+		return
+	}
+	if code := validateAttributes(input.Attributes); code != "" {
+		writeError(w, http.StatusBadRequest, code)
+		return
+	}
+	if code := validateLocation(input.Location); code != "" {
+		writeError(w, http.StatusBadRequest, code)
 		return
 	}
 	// Length and range checks mirror the network server's and the create path's.
@@ -350,6 +424,11 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		MaxDataRate:    input.MaxDataRate,
 		MinDataRate:    input.MinDataRate,
 		MaxTxPower:     input.MaxTxPower,
+		Attributes:     input.Attributes,
+		// Passed through verbatim: the network server decides what an absent
+		// field, a null and an object each mean, and re-encoding them here would
+		// collapse those three cases into one.
+		Location: input.Location,
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)

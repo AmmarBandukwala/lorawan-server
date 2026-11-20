@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, ShieldOff, Trash2 } from 'lucide-react'
+import { Check, Plus, ShieldOff, Trash2, X } from 'lucide-react'
 import {
+  attributeRows,
+  attributeMap,
   deleteDevice,
   describeDeviceEdit,
   diffDeviceEdit,
   editDevice,
   fetchDevice,
+  locationFields,
+  locationProblem,
+  type AttributeRow,
   type DeviceEdit,
   type ProvisionedDevice,
 } from './control'
@@ -42,6 +47,10 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
   const [disableAdr, setDisableAdr] = useState(false)
   const [supportsClassC, setSupportsClassC] = useState(false)
   const [maxDataRate, setMaxDataRate] = useState('-1')
+  const [attributes, setAttributes] = useState<AttributeRow[]>([])
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
+  const [altitude, setAltitude] = useState('')
 
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -58,6 +67,11 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setDisableAdr(found.disable_adr)
       setSupportsClassC(found.supports_class_c)
       setMaxDataRate(String(found.max_data_rate))
+      setAttributes(attributeRows(found.attributes))
+      const position = locationFields(found.location)
+      setLatitude(position.latitude)
+      setLongitude(position.longitude)
+      setAltitude(position.altitude)
       setLoadError('')
     } catch (error) {
       setStored(null)
@@ -77,12 +91,21 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
   // property rather than an optimisation.
   const edit: DeviceEdit = stored ? diffDeviceEdit(stored, {
     name, group, enabled, disableAdr, supportsClassC, maxDataRate,
+    attributes, latitude, longitude, altitude,
   }) : {}
   const changed = Object.keys(edit).length > 0
   const nameProblem = name.trim().length === 0 ? 'A device needs a name to be findable in the list.' : ''
+  // Both are computed from the current rows rather than stored in state, so the
+  // message disappears the moment the row is fixed instead of lingering until the
+  // next save attempt.
+  const attributeProblem = attributeMap(attributes).problem ?? ''
+  const positionProblem = locationProblem({
+    name, group, enabled, disableAdr, supportsClassC, maxDataRate,
+    attributes, latitude, longitude, altitude,
+  })
 
   async function save() {
-    if (!changed || nameProblem) return
+    if (!changed || nameProblem || attributeProblem || positionProblem) return
     setSaving(true)
     setFeedback(null)
     try {
@@ -94,6 +117,11 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setDisableAdr(updated.disable_adr)
       setSupportsClassC(updated.supports_class_c)
       setMaxDataRate(String(updated.max_data_rate))
+      setAttributes(attributeRows(updated.attributes))
+      const position = locationFields(updated.location)
+      setLatitude(position.latitude)
+      setLongitude(position.longitude)
+      setAltitude(position.altitude)
       setFeedback({ kind: 'ok', text: describeDeviceEdit(edit) })
       onChanged()
     } catch (error) {
@@ -180,11 +208,81 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
         </label>
       </div>
 
+      {/* Attributes and position: what the device is for and where it sits.
+          Neither changes how the network behaves — the server stores them and
+          never reads them — so they are kept below the radio settings rather
+          than mixed in with the ones that do. */}
+      <div className="console-attributes">
+        <div className="console-subheading">
+          <b>Context</b>
+          <span>Free-form tags and an installed position. Recorded for the people reading the dashboard later; the network does not act on either.</span>
+        </div>
+
+        <div className="attribute-rows">
+          {attributes.map((row, index) => (
+            <div className="attribute-row" key={index}>
+              <input
+                value={row.key}
+                placeholder="key, e.g. line"
+                aria-label={`Attribute ${index + 1} key`}
+                maxLength={40}
+                onChange={(event) => setAttributes(attributes.map((r, i) => (i === index ? { ...r, key: event.target.value } : r)))}
+              />
+              <input
+                value={row.value}
+                placeholder="value, e.g. cold store 3"
+                aria-label={`Attribute ${index + 1} value`}
+                maxLength={200}
+                onChange={(event) => setAttributes(attributes.map((r, i) => (i === index ? { ...r, value: event.target.value } : r)))}
+              />
+              <button
+                className="text-action"
+                aria-label={`Remove attribute ${row.key || index + 1}`}
+                onClick={() => setAttributes(attributes.filter((_, i) => i !== index))}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          className="text-action"
+          onClick={() => setAttributes([...attributes, { key: '', value: '' }])}
+          disabled={attributes.length >= 32}
+        >
+          <Plus size={13} /> Add attribute
+        </button>
+        {attributeProblem && <p className="form-error">{attributeProblem}</p>}
+
+        <div className="console-settings-grid console-location">
+          <label>
+            Latitude
+            <input value={latitude} onChange={(event) => setLatitude(event.target.value)}
+              placeholder="51.5074" inputMode="decimal" />
+          </label>
+          <label>
+            Longitude
+            <input value={longitude} onChange={(event) => setLongitude(event.target.value)}
+              placeholder="-0.1278" inputMode="decimal" />
+          </label>
+          <label>
+            Altitude (m)
+            <input value={altitude} onChange={(event) => setAltitude(event.target.value)}
+              placeholder="optional" inputMode="numeric" />
+          </label>
+        </div>
+        {positionProblem && <p className="form-error">{positionProblem}</p>}
+        {!positionProblem && stored.location && latitude === '' && longitude === '' && altitude === '' && (
+          <p className="console-empty-note">Saving with all three cleared removes the recorded position.</p>
+        )}
+      </div>
+
       <div className="console-settings-actions">
         <button
           className="button button-primary"
           onClick={() => void save()}
-          disabled={saving || !changed || Boolean(nameProblem)}
+          disabled={saving || !changed || Boolean(nameProblem) || Boolean(attributeProblem) || Boolean(positionProblem)}
         >
           <Check size={14} /> {saving ? 'Saving…' : changed ? `Save ${Object.keys(edit).length} change(s)` : 'No changes'}
         </button>

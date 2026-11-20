@@ -620,3 +620,216 @@ func TestDeleteRequiresTheToken(t *testing.T) {
 		t.Errorf("an unauthorised delete removed the device: %v", err)
 	}
 }
+
+// TestPatchStoresAttributesAndPosition covers the operator context: tags that
+// describe what a device is for, and where it is installed.
+func TestPatchStoresAttributesAndPosition(t *testing.T) {
+	srv, store := newTestAPI(t)
+	ctx := t.Context()
+	eui := mustEUI(t, testDevEUIStr)
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"attributes":{"line":"3","Purpose":"cold store"},"location":{"latitude":51.5074,"longitude":-0.1278,"altitude":12}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	// Keys are normalised on the way in, so the console and the store agree on
+	// how a tag is spelled.
+	if stored.Attributes["line"] != "3" || stored.Attributes["purpose"] != "cold store" {
+		t.Errorf("Attributes = %v, want lower-cased keys", stored.Attributes)
+	}
+	if stored.Location == nil {
+		t.Fatal("Location was not stored")
+	}
+	if stored.Location.Latitude != 51.5074 || stored.Location.Longitude != -0.1278 ||
+		stored.Location.Altitude != 12 {
+		t.Errorf("Location = %+v", stored.Location)
+	}
+
+	// The response must show them too: an edit form reloads from it, and a field
+	// that saves but does not read back looks like a save that did nothing.
+	var view map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatalf("decode the response: %v", err)
+	}
+	attrs, ok := view["attributes"].(map[string]any)
+	if !ok || attrs["line"] != "3" {
+		t.Errorf("response attributes = %v, want the stored pair", view["attributes"])
+	}
+	loc, ok := view["location"].(map[string]any)
+	if !ok || loc["latitude"] != 51.5074 {
+		t.Errorf("response location = %v", view["location"])
+	}
+}
+
+// TestPatchNullLocationClearsIt is the three-state rule for a position: absent
+// leaves it, null removes it, an object sets it. A typed field would read the
+// first two as the same thing, and a position could never be removed.
+func TestPatchNullLocationClearsIt(t *testing.T) {
+	srv, store := newTestAPI(t)
+	ctx := t.Context()
+	eui := mustEUI(t, testDevEUIStr)
+
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"location":{"latitude":1,"longitude":2}}`); rec.Code != http.StatusOK {
+		t.Fatalf("set location: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	// An unrelated patch must not disturb it.
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"name":"renamed"}`); rec.Code != http.StatusOK {
+		t.Fatalf("rename: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Location == nil {
+		t.Fatal("omitting location cleared a stored position")
+	}
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken, `{"location":null}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear location: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err = store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Location != nil {
+		t.Errorf("location = %+v, want it cleared by an explicit null", stored.Location)
+	}
+	// The response omits the field rather than emitting a zeroed position, which
+	// is what keeps 0,0 from appearing as a place in the Gulf of Guinea.
+	if strings.Contains(rec.Body.String(), `"location"`) {
+		t.Errorf("a cleared position must be omitted from the response: %s", rec.Body.String())
+	}
+}
+
+// TestPatchEmptyAttributesClearsThem: an empty object is a deliberate clearing,
+// distinct from omitting the field.
+func TestPatchEmptyAttributesClearsThem(t *testing.T) {
+	srv, store := newTestAPI(t)
+	ctx := t.Context()
+	eui := mustEUI(t, testDevEUIStr)
+
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"attributes":{"line":"3"}}`); rec.Code != http.StatusOK {
+		t.Fatalf("set attributes: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"name":"renamed"}`); rec.Code != http.StatusOK {
+		t.Fatalf("rename: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Attributes["line"] != "3" {
+		t.Errorf("omitting attributes dropped a stored tag: %v", stored.Attributes)
+	}
+
+	if rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"attributes":{}}`); rec.Code != http.StatusOK {
+		t.Fatalf("clear attributes: status = %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err = store.DeviceByDevEUI(ctx, eui)
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if len(stored.Attributes) != 0 {
+		t.Errorf("Attributes = %v, want empty after an explicit clearing", stored.Attributes)
+	}
+}
+
+func TestPatchRejectsUnusableContext(t *testing.T) {
+	srv, _ := newTestAPI(t)
+	cases := map[string]string{
+		"latitude without longitude": `{"location":{"latitude":51.5}}`,
+		"longitude without latitude": `{"location":{"longitude":-0.1}}`,
+		"latitude out of range":      `{"location":{"latitude":91,"longitude":0}}`,
+		"longitude out of range":     `{"location":{"latitude":0,"longitude":181}}`,
+		// 9000 m is deliberately not in this list: the bound is -1000..10000 so
+		// that Everest fits, and a value inside the range must be accepted.
+		"altitude out of range":     `{"location":{"latitude":0,"longitude":0,"altitude":10001}}`,
+		"empty attribute value":     `{"attributes":{"line":""}}`,
+		"attribute key with spaces": `{"attributes":{"rooftop antenna":"1"}}`,
+		"empty attribute key":       `{"attributes":{"":"value"}}`,
+	}
+	for name, body := range cases {
+		rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400 (%s)", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestPatchContextRejectionChangesNothing: a rejected field must not half-apply.
+// The console shows the error and the operator fixes the other field, so a patch
+// that stored the valid half would leave a device placed somewhere nobody typed.
+func TestPatchContextRejectionChangesNothing(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	rec := do(srv, http.MethodPatch, "/api/v1/devices/"+testDevEUIStr, testToken,
+		`{"name":"should not stick","location":{"latitude":91,"longitude":0}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, testDevEUIStr))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Name == "should not stick" {
+		t.Error("a rejected patch still renamed the device")
+	}
+	if stored.Location != nil {
+		t.Error("a rejected patch stored a position")
+	}
+}
+
+// TestProvisionAcceptsContext covers creating a device with its context in one
+// request, which is how a device arrives from a commissioning sheet.
+func TestProvisionAcceptsContext(t *testing.T) {
+	srv, store := newTestAPI(t)
+
+	rec := do(srv, http.MethodPost, "/api/v1/devices", testToken, `{
+		"dev_eui":"0011223344556699","join_eui":"0102030405060708",
+		"app_key":"2b7e151628aed2a6abf7158809cf4f3c","name":"New sensor",
+		"group":"Roof","attributes":{"rack":"b2"},
+		"location":{"latitude":-33.86,"longitude":151.21,"altitude":40}}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := store.DeviceByDevEUI(t.Context(), mustEUI(t, "0011223344556699"))
+	if err != nil {
+		t.Fatalf("DeviceByDevEUI: %v", err)
+	}
+	if stored.Attributes["rack"] != "b2" {
+		t.Errorf("Attributes = %v", stored.Attributes)
+	}
+	if stored.Location == nil || stored.Location.Altitude != 40 {
+		t.Errorf("Location = %+v", stored.Location)
+	}
+	// Keys still never leave the server, whatever else the response carries.
+	if strings.Contains(rec.Body.String(), "2b7e151628aed2a6abf7158809cf4f3c") {
+		t.Error("the provisioning response echoed the AppKey")
+	}
+}
+
+// TestProvisionRejectsHalfTypedPosition is the same rule as the patch path: a
+// latitude alone cannot become a place.
+func TestProvisionRejectsHalfTypedPosition(t *testing.T) {
+	srv, _ := newTestAPI(t)
+
+	rec := do(srv, http.MethodPost, "/api/v1/devices", testToken, `{
+		"dev_eui":"0011223344556698","join_eui":"0102030405060708",
+		"app_key":"2b7e151628aed2a6abf7158809cf4f3c","name":"Half typed",
+		"location":{"latitude":51.5}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
