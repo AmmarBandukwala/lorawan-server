@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { Battery, Check, Send, Trash2, X, Zap } from 'lucide-react'
+import { Battery, Check, RefreshCw, Send, Trash2, X, Zap } from 'lucide-react'
 import {
   batteryPercent,
   cancelDownlink,
   enqueueDownlink,
   fetchSession,
+  fetchUplinks,
+  formatDecoded,
   requestDeviceStatus,
   validatePayload,
   type DeviceSession,
+  type UplinkRow,
 } from './control'
 import type { Device } from './types'
 import { DeviceSettings } from './DeviceSettings'
@@ -224,6 +227,11 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
         </>
       )}
 
+      {/* Readings come from the store rather than from the session, so they show
+          even when the live session read failed — and they are the only place the
+          console proves a payload formatter is doing anything. */}
+      <RecentReadings devEUI={device.eui} />
+
       {/* Settings sit outside the session guard on purpose: a device that has
           never joined still has settings, and being unable to rename or pause a
           device before its first join would make provisioning a two-step process
@@ -275,6 +283,96 @@ export function DutyCyclePanel({ usage, window: windowLabel, denials }: {
         </p>
       )}
     </article>
+  )
+}
+
+/**
+ * The device's recent stored uplinks, decoded.
+ *
+ * This is where a payload formatter either earns its keep or reveals that it has
+ * never run. The session panel says the device is talking; this says what it said.
+ * Three states stay distinct because each calls for a different action: no
+ * formatter (hex on screen, so go associate a model), a formatter that rejected
+ * the frame (its own error, per frame), and a reading (the fields themselves).
+ */
+function RecentReadings({ devEUI }: { devEUI: string }) {
+  const [rows, setRows] = useState<UplinkRow[]>([])
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [problem, setProblem] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      setRows(await fetchUplinks(devEUI, 10))
+      setState('ready')
+      setProblem('')
+    } catch (error) {
+      // An in-memory network server has no uplink history at all, and that is a
+      // note rather than a failure: everything else on this panel still works.
+      setRows([])
+      setState('error')
+      setProblem(error instanceof Error ? error.message : 'Uplink history is unavailable.')
+    }
+  }, [devEUI])
+
+  useEffect(() => {
+    // The reset rides along inside the deferred task rather than running in the
+    // effect body: setting state there renders an empty panel for a frame before
+    // the read has even started.
+    const first = setTimeout(() => {
+      setState('loading')
+      void load()
+    }, 0)
+    return () => clearTimeout(first)
+  }, [load])
+
+  return (
+    <div className="console-readings">
+      <div className="console-subheading">
+        <b>Recent readings</b>
+        <button className="text-action" onClick={() => void load()}>
+          <RefreshCw size={13} /> Reload
+        </button>
+      </div>
+      {state === 'loading' && <p className="form-note">Reading stored uplinks…</p>}
+      {state === 'error' && <p className="form-note">{problem}</p>}
+      {state === 'ready' && rows.length === 0 && (
+        <p className="form-note">No stored uplinks for this device yet.</p>
+      )}
+      {rows.map((row) => <ReadingRow key={row.uplink_id} row={row} />)}
+    </div>
+  )
+}
+
+/** One stored uplink: when it arrived, and what it turned into. */
+function ReadingRow({ row }: { row: UplinkRow }) {
+  const lines = formatDecoded(row.decoded)
+  const at = new Date(row.received_at)
+  return (
+    <div className="console-reading">
+      <div className="console-reading-top">
+        <b>{Number.isNaN(at.getTime()) ? row.received_at : at.toLocaleTimeString()}</b>
+        <span>
+          #{row.f_cnt_up}
+          {row.f_port >= 0 ? ` · port ${row.f_port}` : ' · MAC only'}
+          {row.retransmission ? ' · repeat' : ''}
+        </span>
+      </div>
+      {lines.length > 0 && (
+        <div className="console-reading-values">
+          {lines.map((line) => (
+            <span key={line.key}><small>{line.key}</small>{line.value}</span>
+          ))}
+        </div>
+      )}
+      {lines.length === 0 && row.decode_error && (
+        <p className="form-error">Decoder: {row.decode_error}</p>
+      )}
+      {lines.length === 0 && !row.decode_error && row.data && (
+        <code title={row.has_codec ? 'The formatter returned nothing for this frame' : 'No payload formatter on this device’s model'}>
+          {row.data}
+        </code>
+      )}
+    </div>
   )
 }
 

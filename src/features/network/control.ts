@@ -180,6 +180,139 @@ export type NetworkStatus = {
     usage: SubBandUsage[]
     denials: Record<string, number>
   }
+  /**
+   * Payload-formatter health.
+   *
+   * Absent when this build has no decoder wired up, which is why every field
+   * below is read defensively. The counters are process-lifetime and only cover
+   * frames that actually arrived: a model nobody has heard from yet is not
+   * counted, so this is a report about traffic, not an audit of the fleet.
+   */
+  decoding?: {
+    enabled: boolean
+    frames_decoded: number
+    frames_failed: number
+    compiled_formatters: number
+    broken_formatters: number
+    broken_models?: { model_id: string; reason: string }[]
+  }
+}
+
+/**
+ * What the payload-formatter panel should say.
+ *
+ * The distinction it draws is the one an operator cannot infer from the numbers
+ * alone: a formatter that will not compile means every frame from every device on
+ * that model is stored as raw bytes while the devices themselves look perfectly
+ * healthy, whereas a frame the formatter refused is one bad frame on a formatter
+ * that is otherwise working. The first is a fleet-wide configuration fault, the
+ * second is normal noise, and rendering them identically would send someone to
+ * check the radios.
+ *
+ * Returns null when the server reports no decoder at all, so the panel renders
+ * nothing instead of a wall of zeros that reads like a healthy fleet.
+ */
+export function decodeHealth(decoding: NetworkStatus['decoding']): {
+  enabled: boolean
+  framesDecoded: number
+  framesFailed: number
+  compiled: number
+  broken: { model_id: string; reason: string }[]
+  problem: string
+} | null {
+  if (!decoding) return null
+  const broken = decoding.broken_models ?? []
+
+  let problem = ''
+  if (broken.length > 0) {
+    // Naming the models is the point: "2 broken formatters" is a number to walk
+    // past, "aqi-pro: unexpected token" is a task.
+    const names = broken.map((b) => b.model_id).join(', ')
+    problem = `${broken.length} device ${broken.length === 1 ? 'model has' : 'models have'} a payload formatter that will not run (${names}). Every frame from those devices is stored undecoded, and the devices themselves look healthy.`
+    if (broken[0].reason) problem += ` First reported: ${broken[0].reason}`
+  } else if (decoding.frames_failed > 0) {
+    problem = `${decoding.frames_failed.toLocaleString()} ${decoding.frames_failed === 1 ? 'frame was' : 'frames were'} rejected by its formatter since the server started. The formatters compile, so these are frames the scripts refused.`
+  }
+
+  return {
+    enabled: decoding.enabled,
+    framesDecoded: decoding.frames_decoded,
+    framesFailed: decoding.frames_failed,
+    compiled: decoding.compiled_formatters,
+    broken,
+    problem,
+  }
+}
+
+/**
+ * A process lifetime as an operator reads it: coarse, and only as precise as the
+ * unit that matters. Nobody wants "3720 seconds"; they want to know whether this
+ * is the process that has been up all week or one that restarted a minute ago.
+ */
+export function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return 'Unknown'
+  const total = Math.floor(seconds)
+  const days = Math.floor(total / 86400)
+  const hours = Math.floor((total % 86400) / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const secs = total % 60
+
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${minutes}m`
+  if (minutes > 0) return `${minutes}m ${secs}s`
+  return `${secs}s`
+}
+
+/**
+ * Whether an uptime this short means the server has been restarting.
+ *
+ * A console that shows "up 12s" next to a device list that has not changed is
+ * the evidence for "the container is crash-looping", which is otherwise one of
+ * the hardest things to notice from a browser.
+ */
+export function recentlyRestarted(seconds: number): boolean {
+  return Number.isFinite(seconds) && seconds >= 0 && seconds < 120
+}
+
+/** How many gateways there are, and how many are answering right now. */
+export type GatewaySummary = {
+  online: number
+  total: number
+  /**
+   * Which population the numbers describe. `network-server` means the live
+   * presence list was used and the inventory only added rows nobody has heard
+   * from; `inventory` means the network server could not be reached, so nothing
+   * here says whether a single radio is actually working.
+   */
+  source: 'network-server' | 'inventory'
+}
+
+/**
+ * Reconciles the two places gateway counts come from.
+ *
+ * The database's inventory and the network server's presence list are different
+ * populations, and showing one of them as "the number of gateways" is what makes
+ * the Overview contradict the Gateways view: a gateway someone typed into the
+ * inventory but never powered on is counted by one and not the other, and a
+ * gateway that arrived unannounced is counted by the reverse. The honest figure
+ * is the union, and the honest label for "online" is whatever the process that
+ * receives the packets says.
+ *
+ * When the server is unreachable the inventory is still worth showing, but it is
+ * labelled as such — "3 registered" is not a claim about radio health, and
+ * presenting it as one is how an outage gets read as a configuration problem.
+ */
+export function gatewaySummary(status: NetworkStatus | null, inventoryIds: string[]): GatewaySummary {
+  if (!status) {
+    return { online: 0, total: inventoryIds.length, source: 'inventory' }
+  }
+  const heard = new Set(status.gateways.map((g) => g.gateway_eui.toUpperCase()))
+  const unheard = inventoryIds.filter((id) => !heard.has(id.toUpperCase())).length
+  return {
+    online: status.gateways_online,
+    total: status.gateways_total + unheard,
+    source: 'network-server',
+  }
 }
 
 /** A command the network server refused, carrying the reason it gave. */
@@ -326,6 +459,12 @@ export interface DeviceEdit {
   attributes?: Record<string, string>
   /** An explicit null clears the stored position; undefined leaves it alone. */
   location?: DeviceLocation | null
+  /**
+   * Re-associates the device with a model. '' clears the association — the
+   * device stops being decoded — and undefined leaves it alone, which is the
+   * same distinction the location field makes.
+   */
+  modelId?: string
 }
 
 /** Where a device is installed. Altitude is metres above mean sea level. */
@@ -359,6 +498,14 @@ export interface ProvisionedDevice {
   attributes?: Record<string, string>
   /** Absent when no position has been recorded — distinct from 0,0. */
   location?: DeviceLocation
+  /**
+   * The device model this device is an instance of, and therefore the payload
+   * formatter its uplinks are decoded with. Absent when nobody has said what
+   * kind of device it is, which is the normal state for anything provisioned
+   * before models existed; such a device still reports, its bytes simply arrive
+   * as hex.
+   */
+  model_id?: string
 }
 
 /**
@@ -392,6 +539,12 @@ export interface DeviceForm {
   latitude: string
   longitude: string
   altitude: string
+  /**
+   * The model slug, or '' for "no model". Text because a select can legitimately
+   * hold the empty choice, and '' must mean "clear the association" rather than
+   * "leave alone".
+   */
+  modelId: string
 }
 
 /**
@@ -566,6 +719,12 @@ export function diffDeviceEdit(stored: ProvisionedDevice, form: DeviceForm): Dev
 
   const position = positionFromForm(form, stored.location)
   if (position !== undefined) edit.location = position
+
+  // '' is an instruction to clear the association, so it counts as a change
+  // whenever a model is currently set; leaving it out would make a model
+  // impossible to detach from the console.
+  const modelId = form.modelId.trim()
+  if (modelId !== (stored.model_id ?? '')) edit.modelId = modelId
   return edit
 }
 
@@ -595,6 +754,9 @@ export function describeDeviceEdit(edit: DeviceEdit): string {
       ? 'position removed'
       : `position ${edit.location.latitude.toFixed(5)}, ${edit.location.longitude.toFixed(5)}`)
   }
+  if (edit.modelId !== undefined) {
+    parts.push(edit.modelId === '' ? 'model cleared (uplinks will no longer be decoded)' : `model ${edit.modelId}`)
+  }
   if (parts.length === 0) return 'Saved.'
   const radio = parts.some((p) => p.includes('ADR') || p.includes('DR') || p.includes('class'))
   return `Saved: ${parts.join(', ')}.${radio ? ' Takes effect on the device’s next uplink.' : ''}`
@@ -622,6 +784,9 @@ export async function editDevice(devEUI: string, edit: DeviceEdit): Promise<Prov
   // and position impossible to remove from the console.
   if (edit.attributes !== undefined) body.attributes = edit.attributes
   if (edit.location !== undefined) body.location = edit.location
+  // Sent as-is including '': clearing an association is an instruction, and
+  // dropping an empty string would make a model impossible to detach.
+  if (edit.modelId !== undefined) body.model_id = edit.modelId
   if (Object.keys(body).length === 0) {
     throw new Error('Nothing to save — no setting was changed.')
   }
@@ -691,5 +856,193 @@ export function validatePayload(hex: string, maxBytes = 51): string {
   if (cleaned.length % 2 !== 0) return 'Hex needs an even number of digits.'
   if (cleaned.length / 2 > maxBytes) return `At most ${maxBytes} bytes per downlink.`
   return ''
+}
+
+/**
+ * Device models: what a kind of sensor is, and how its bytes are read.
+ *
+ * A model is the unit that carries a vendor's payload formatter, so this is the
+ * part of the console an operator touches when integrating a new sensor type —
+ * paste the vendor's JavaScript, test it against a frame from the datasheet,
+ * save it, then point devices at it.
+ *
+ * The formatter is returned on reads. It is not a secret (it came from a vendor's
+ * datasheet) and an operator who cannot see what a fleet is running cannot audit
+ * it. The list omits scripts, because a fleet's worth of them is hundreds of
+ * kilobytes and a picker only needs names.
+ */
+export interface DeviceModel {
+  model_id: string
+  name: string
+  description?: string
+  /** 'NONE' stores no formatter, so its uplinks stay hex. */
+  codec_kind: 'NONE' | 'JS'
+  /** Absent from list responses; present when a single model is read. */
+  codec_script?: string
+  /** True when a JS formatter is actually stored, without shipping it. */
+  codec_present: boolean
+  created_at?: string
+  updated_at?: string
+}
+
+/** What creating or replacing a model sends. */
+export interface ModelInput {
+  name: string
+  description?: string
+  codecKind: 'NONE' | 'JS'
+  codecScript?: string
+}
+
+/** The slug rule the server enforces, mirrored here for a local message. */
+export const MODEL_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{1,63}$/
+
+export function modelIdProblem(id: string): string {
+  if (id === '') return 'Give the model an id, for example "cold-chain-probe-v2".'
+  if (!MODEL_ID_PATTERN.test(id)) {
+    return 'An id is 2 to 64 characters of lower-case letters, digits, "-" or "_", starting with a letter or digit.'
+  }
+  return ''
+}
+
+export const fetchModels = () =>
+  request<{ models: DeviceModel[] }>('GET', '/models').then((r) => r.models ?? [])
+
+export const fetchModel = (modelID: string) =>
+  request<DeviceModel>('GET', `/models/${modelID}`, undefined, {
+    404: 'No device model with that name.',
+  })
+
+/**
+ * Creates a model. A slug that already exists is a 409 rather than an overwrite:
+ * a typo must not silently rewrite a formatter a fleet depends on.
+ */
+export const createModel = (modelID: string, input: ModelInput) =>
+  request<DeviceModel>('POST', `/models/${modelID}`, {
+    name: input.name,
+    description: input.description ?? '',
+    codec_kind: input.codecKind,
+    codec_script: input.codecScript ?? '',
+  }, {
+    409: 'A model with that name already exists. Edit it instead of creating a new one.',
+  })
+
+/** Replaces a model. Also how a new slug is created, matching the server's upsert. */
+export const updateModel = (modelID: string, input: ModelInput) =>
+  request<DeviceModel>('PUT', `/models/${modelID}`, {
+    name: input.name,
+    description: input.description ?? '',
+    codec_kind: input.codecKind,
+    codec_script: input.codecScript ?? '',
+  })
+
+/** What deleting a model reports, including the consequence the UI must state. */
+export type ModelDeletion = {
+  deleted: string
+  devices_unassociated: number
+  note?: string
+}
+
+export const deleteModel = (modelID: string) =>
+  request<ModelDeletion>('DELETE', `/models/${modelID}`, undefined, {
+    404: 'No device model with that name.',
+  })
+
+/**
+ * The result of running a formatter against bytes without saving anything.
+ *
+ * A compile error and a runtime error both arrive as a successful HTTP response
+ * with ok:false, because the request was well formed and the honest answer to
+ * "does this script work" is "no, and here is why". Treating them as transport
+ * failures would hide the message that names the offending line.
+ */
+export type DecodeTrial = {
+  ok: boolean
+  data?: Record<string, unknown>
+  error?: string
+  elapsed_ms?: number
+}
+
+export const testModelDecode = (
+  modelID: string,
+  input: { payload: string; fPort: number; devEUI?: string; script?: string },
+) =>
+  request<DecodeTrial>('POST', `/models/${modelID}/decode`, {
+    payload: input.payload,
+    f_port: input.fPort,
+    dev_eui: input.devEUI,
+    script: input.script,
+  })
+
+/**
+ * One stored uplink with whatever the formatter made of it.
+ *
+ * `decoded` is the formatter's own object, passed through untouched so a reading
+ * of 41.2 does not become 41.200000000000005 on the way to the screen. Key order
+ * is not preserved — the database stores it as JSONB — so a comparison against a
+ * vendor tool should compare values, not bytes.
+ */
+export type UplinkRow = {
+  uplink_id: number
+  received_at: string
+  dev_eui: string
+  dev_addr?: string
+  f_cnt_up: number
+  /** -1 marks a frame that carried only MAC commands and no application port. */
+  f_port: number
+  /** Decrypted frame payload, base64. */
+  data?: string
+  /** The whole frame as it came off the radio, hex. */
+  raw_payload?: string
+  gateway_id?: string
+  frequency_hz?: number
+  data_rate_index: number
+  rssi: number
+  snr: number
+  retransmission?: boolean
+  decoded?: Record<string, unknown>
+  decode_error?: string
+  /**
+   * Whether a formatter ran at all. Without it, "this device has no model" and
+   * "the formatter rejected this frame" look identical when both optional fields
+   * above are absent.
+   */
+  has_codec: boolean
+}
+
+export const fetchUplinks = (devEUI?: string, limit = 20) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (devEUI) params.set('dev_eui', devEUI)
+  return request<{ uplinks: UplinkRow[] }>('GET', `/uplinks?${params}`).then((r) => r.uplinks ?? [])
+}
+
+/**
+ * A decoded reading as lines an operator can read.
+ *
+ * Values are rendered rather than JSON-stringified because the point of a
+ * formatter is to turn bytes into engineering units: a nested object is flattened
+ * to dotted keys so a reading inside a channel array is still one line.
+ */
+export function formatDecoded(decoded: Record<string, unknown> | undefined): { key: string; value: string }[] {
+  if (!decoded) return []
+  const out: { key: string; value: string }[] = []
+  const walk = (value: unknown, prefix: string) => {
+    if (value === null || value === undefined) {
+      out.push({ key: prefix, value: '—' })
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${prefix}[${index}]`))
+      return
+    }
+    if (typeof value === 'object') {
+      for (const [key, child] of Object.entries(value)) {
+        walk(child, prefix ? `${prefix}.${key}` : key)
+      }
+      return
+    }
+    out.push({ key: prefix, value: String(value) })
+  }
+  walk(decoded, '')
+  return out
 }
 

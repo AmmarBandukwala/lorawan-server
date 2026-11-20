@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Check, ChevronDown,
+  Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Braces, Check, ChevronDown,
   Menu, Plus, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
 } from 'lucide-react'
 import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
 import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from './features/network/Gateways'
-import { fetchRegions, fetchStatus, type NetworkStatus, type RegionList } from './features/network/control'
+import { DeviceModels } from './features/network/DeviceModels'
+import { NetworkServerPanel } from './features/network/NetworkHealth'
+import { fetchRegions, fetchStatus, gatewaySummary, type NetworkStatus, type RegionList } from './features/network/control'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
 import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, UNASSIGNED_GROUP } from './features/network/constants'
 import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type GroupFilter, type View } from './features/network/types'
@@ -15,7 +17,8 @@ import './App.css'
 
 const navigation: { name: View; icon: typeof Activity }[] = [
   { name: 'Overview', icon: Activity }, { name: 'Devices', icon: Boxes },
-  { name: 'Gateways', icon: RadioTower }, { name: 'Events', icon: Radio },
+  { name: 'Gateways', icon: RadioTower }, { name: 'Models', icon: Braces },
+  { name: 'Events', icon: Radio },
 ]
 
 function App() {
@@ -155,6 +158,14 @@ function App() {
       (health) => health.gateway_eui.toUpperCase() === record.id.toUpperCase()),
   ), [gateways, status])
 
+  // The gateway count the Overview shows. It is reconciled rather than taken
+  // from either source directly, because the inventory and the live presence
+  // list disagree by construction — see gatewaySummary.
+  const gatewayTotals = useMemo(
+    () => gatewaySummary(status, gateways.map((record) => record.id)),
+    [gateways, status],
+  )
+
   /**
    * What the dialog does after the network server accepts a device.
    *
@@ -230,8 +241,8 @@ function App() {
 
         <div className="page-content">
           <div className="page-heading">
-            <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : `${view} connected to your local network server.`}</p></div>
-            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refreshNetworkSnapshot()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button>{view !== 'Settings' && <button className="button button-primary" onClick={() => setShowAdd(true)} disabled={connection !== 'connected'}><Plus size={16} />Add device</button>}</div>
+            <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : view === 'Models' ? 'Sensor types, and how their payloads are turned into readings.' : `${view} connected to your local network server.`}</p></div>
+            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refreshNetworkSnapshot()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button>{view !== 'Settings' && view !== 'Models' && <button className="button button-primary" onClick={() => setShowAdd(true)} disabled={connection !== 'connected'}><Plus size={16} />Add device</button>}</div>
           </div>
 
           {connection !== 'connected' && connection !== 'degraded' && <div className="demo-notice"><span className="notice-dot" />{connection === 'loading' ? 'Connecting to the database API…' : 'Database API unavailable · no local sample data is shown'}</div>}
@@ -243,14 +254,21 @@ function App() {
               <article className="metric-card"><div className="metric-top"><span>Registered devices</span><Boxes size={16} /></div><div className="metric-value">{overview.deviceCount}<span className="metric-unit"> devices</span></div><div className="metric-foot">Persisted device inventory</div></article>
               <article className="metric-card"><div className="metric-top"><span>Online now</span><span className={`status-indicator ${onlineCount ? 'green' : ''}`} /></div><div className="metric-value">{onlineCount}<span className="metric-unit"> / {overview.deviceCount}</span></div><div className="metric-foot"><span className="availability-bar"><i style={{ width: `${overview.deviceCount ? onlineCount / overview.deviceCount * 100 : 0}%` }} /></span><span>{overview.deviceCount ? Math.round(onlineCount / overview.deviceCount * 100) : 0}% availability</span></div></article>
               <article className="metric-card"><div className="metric-top"><span>Needs attention</span><TriangleAlert size={16} className="warning-icon" /></div><div className="metric-value">{attentionCount + overview.offlineDevices}<span className="metric-unit"> devices</span></div><div className="metric-foot"><span className="metric-warning">{attentionCount} low battery</span><span>·</span><span>{overview.offlineDevices} offline</span></div></article>
-              <article className="metric-card gateway-metric"><div className="metric-top"><span>Gateways</span><RadioTower size={16} /></div><div className="metric-value">{overview.onlineGateways}<span className="metric-unit"> / {overview.gatewayCount}</span></div><div className="metric-foot"><span className={`status-indicator ${overview.onlineGateways ? 'green' : ''}`} />{overview.gatewayCount ? `${overview.onlineGateways} reporting recently` : 'No gateways registered'}</div></article>
+              <article className="metric-card gateway-metric"><div className="metric-top"><span>Gateways</span><RadioTower size={16} /></div><div className="metric-value">{gatewayTotals.online}<span className="metric-unit"> / {gatewayTotals.total}</span></div><div className="metric-foot"><span className={`status-indicator ${gatewayTotals.online ? 'green' : ''}`} />{gatewayTotals.total === 0 ? 'No gateways known' : gatewayTotals.source === 'network-server' ? `${gatewayTotals.online} reporting to the network server` : `${gatewayTotals.total} registered, presence unknown`}</div></article>
             </section>
 
             <section className="middle-grid">
               <article className="panel traffic-panel"><div className="panel-heading"><div><h2>Message traffic</h2><p>Uplinks received in the last 24 hours</p></div><span className="select-button">Last 24 hours</span></div><div className="traffic-summary"><strong>{overview.uplinks24h.toLocaleString()}</strong><small>received uplinks</small></div><div className="chart-wrap"><div className="chart"><div className="chart-grid"><i /><i /><i /><i /><i /></div><div className="chart-bars" role="img" aria-label={`${overview.uplinks24h} uplinks received in the last 24 hours`}>{overview.hourlyUplinks.map((count, index) => <i key={index} title={`${count} uplinks`} style={{ height: maxHourlyTraffic ? `${Math.max(3, count / maxHourlyTraffic * 100)}%` : '0%' }} />)}</div><div className="chart-x-labels"><span>24h ago</span><span>18h</span><span>12h</span><span>6h</span><span>Now</span></div></div></div><div className="chart-legend"><span><i className="legend-dot" />Received uplinks</span></div></article>
 
-              <article className="panel gateway-panel"><div className="panel-heading"><div><h2>Gateway health</h2><p>{overview.onlineGateways} online · {overview.gatewayCount} registered</p></div><button className="text-action" onClick={() => setView('Gateways')}>View all <ArrowUpRight size={14} /></button></div><div className="gateway-list">{gateways.slice(0, 3).map((gateway) => <Gateway key={gateway.id} gateway={gateway} />)}{gateways.length === 0 && <div className="empty-result">No gateways registered yet.</div>}</div><div className="gateway-footer"><span>Latest reception</span><b>{gateways[0]?.lastSeen ?? 'No radio traffic'}</b></div></article>
+              <article className="panel gateway-panel"><div className="panel-heading"><div><h2>Gateway health</h2><p>{gatewayTotals.online} online · {gatewayTotals.total} known{gatewayTotals.source === 'network-server' ? '' : ' (presence unknown)'}</p></div><button className="text-action" onClick={() => setView('Gateways')}>View all <ArrowUpRight size={14} /></button></div><div className="gateway-list">{gateways.slice(0, 3).map((gateway) => <Gateway key={gateway.id} gateway={gateway} />)}{gateways.length === 0 && <div className="empty-result">No gateways registered yet.</div>}</div><div className="gateway-footer"><span>Latest reception</span><b>{gateways[0]?.lastSeen ?? 'No radio traffic'}</b></div></article>
             </section>
+
+            {/* Identity and liveness of the process itself. It sits here rather
+                than in Settings because these are read-only facts an operator
+                needs while looking at traffic — the NetID to write into a device,
+                and whether this server has been up long enough to trust its
+                counters. */}
+            <NetworkServerPanel status={status} inventoryIds={gateways.map((record) => record.id)} />
 
             <section className="panel device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices.slice(0, 5)} /></section>
 
@@ -294,6 +312,7 @@ function App() {
             {status && status.integrations && <article className="panel integration-panel"><div className="panel-heading"><div><h2>Integrations</h2><p>{status.integrations.sinks.join(', ') || 'No sinks configured'}</p></div></div><div className="gateway-stats"><div><span>Delivered</span><b>{status.integrations.published.toLocaleString()}</b></div><div><span>Failed</span><b>{status.integrations.delivery_failures.toLocaleString()}</b></div><div><span>Dropped</span><b>{status.integrations.dropped.toLocaleString()}</b></div><div><span>In queue</span><b>{status.integrations.queued.toLocaleString()}</b></div></div>{status.integrations.dropped > 0 && <p className="form-error" role="alert">Events are being dropped: the queue is full, so a receiver is too slow or unreachable.</p>}</article>}
             {!status && <div className="panel integration-panel"><b>No health report from the network server.</b><span> Gateway presence, duty-cycle occupancy and integration counters need the network server reachable.</span></div>}
           </div>}
+          {view === 'Models' && <DeviceModels decoding={status?.decoding} />}
           {view === 'Events' && <section className="panel event-view"><div className="panel-heading"><div><h2>Network events</h2><p>Recent activity from your local network</p></div><span className="select-button">Most recent</span></div><div className="activity-list event-list">{events.map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></section>}
           {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} regions={regions?.regions ?? FALLBACK_REGIONS} regionsAreFallback={regions === null || regions.source === 'fallback'} />}
 

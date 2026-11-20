@@ -8,10 +8,12 @@ import {
   diffDeviceEdit,
   editDevice,
   fetchDevice,
+  fetchModels,
   locationFields,
   locationProblem,
   type AttributeRow,
   type DeviceEdit,
+  type DeviceModel,
   type ProvisionedDevice,
 } from './control'
 import type { Device } from './types'
@@ -51,6 +53,13 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [altitude, setAltitude] = useState('')
+  const [modelId, setModelId] = useState('')
+  // The picker's options. Fetched separately from the device because the list is
+  // the same for every device, and a failure here must not stop the settings form:
+  // a device whose model list could not be read still has a name and an ADR
+  // setting to edit.
+  const [models, setModels] = useState<DeviceModel[]>([])
+  const [modelsUnavailable, setModelsUnavailable] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
@@ -72,6 +81,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setLatitude(position.latitude)
       setLongitude(position.longitude)
       setAltitude(position.altitude)
+      setModelId(found.model_id ?? '')
       setLoadError('')
     } catch (error) {
       setStored(null)
@@ -86,12 +96,34 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
     return () => clearTimeout(first)
   }, [load])
 
+  useEffect(() => {
+    let active = true
+    const timer = setTimeout(async () => {
+      try {
+        const list = await fetchModels()
+        if (!active) return
+        setModels(list)
+        setModelsUnavailable(false)
+      } catch {
+        // An empty picker is survivable; the stored model_id still displays as
+        // its own option, so the association is never silently dropped.
+        if (!active) return
+        setModels([])
+        setModelsUnavailable(true)
+      }
+    }, 0)
+    return () => {
+      active = false
+      clearTimeout(timer)
+    }
+  }, [])
+
   // The diff, not the form. A field that still matches what was loaded is left
   // out of the request entirely; see diffDeviceEdit for why that is the safety
   // property rather than an optimisation.
   const edit: DeviceEdit = stored ? diffDeviceEdit(stored, {
     name, group, enabled, disableAdr, supportsClassC, maxDataRate,
-    attributes, latitude, longitude, altitude,
+    attributes, latitude, longitude, altitude, modelId,
   }) : {}
   const changed = Object.keys(edit).length > 0
   const nameProblem = name.trim().length === 0 ? 'A device needs a name to be findable in the list.' : ''
@@ -101,7 +133,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
   const attributeProblem = attributeMap(attributes).problem ?? ''
   const positionProblem = locationProblem({
     name, group, enabled, disableAdr, supportsClassC, maxDataRate,
-    attributes, latitude, longitude, altitude,
+    attributes, latitude, longitude, altitude, modelId,
   })
 
   async function save() {
@@ -118,6 +150,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setSupportsClassC(updated.supports_class_c)
       setMaxDataRate(String(updated.max_data_rate))
       setAttributes(attributeRows(updated.attributes))
+      setModelId(updated.model_id ?? '')
       const position = locationFields(updated.location)
       setLatitude(position.latitude)
       setLongitude(position.longitude)
@@ -182,6 +215,30 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
             <option value="-1">Band default (no device limit)</option>
             {[0, 1, 2, 3, 4, 5, 6, 7].map((dr) => <option key={dr} value={dr}>DR{dr}</option>)}
           </select>
+        </label>
+        <label>
+          Device model
+          <select value={modelId} onChange={(event) => setModelId(event.target.value)}>
+            <option value="">No model — payloads stay as hex</option>
+            {/* A stored association is always renderable, even when the list
+                could not be read: an option that vanished would silently offer
+                to clear a model the device actually has. */}
+            {modelId !== '' && !models.some((model) => model.model_id === modelId) && (
+              <option value={modelId}>{modelId} (not in the list)</option>
+            )}
+            {models.map((model) => (
+              <option key={model.model_id} value={model.model_id}>
+                {model.name} · {model.model_id}{model.codec_present ? '' : ' — no formatter'}
+              </option>
+            ))}
+          </select>
+          <small className="field-hint">
+            {modelsUnavailable
+              ? 'The model list could not be read, so the stored association is shown as saved.'
+              : models.length === 0
+                ? 'No models exist yet. Add one under Models to turn this device’s bytes into readings.'
+                : 'The model decides how this device’s uplinks are decoded. Changing it affects new uplinks only — stored readings keep what they were decoded with.'}
+          </small>
         </label>
       </div>
       {nameProblem && <p className="form-error">{nameProblem}</p>}

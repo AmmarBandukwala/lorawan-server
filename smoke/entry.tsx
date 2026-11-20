@@ -5,9 +5,14 @@ import { FALLBACK_REGIONS } from '../src/features/network/constants'
 import { DeviceHeader, DeviceTable, GatewayCard, ActivityItem, SettingsForm } from '../src/features/network/components'
 import { DeviceConsole } from '../src/features/network/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/DeviceSettings'
+import { DeviceModels } from '../src/features/network/DeviceModels'
 import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/Gateways'
+import { DecodeHealthPanel, NetworkServerPanel } from '../src/features/network/NetworkHealth'
 import {
-  attributeMap, attributeRows, describeDeviceEdit, diffDeviceEdit, locationFields, locationProblem,
+  attributeMap, attributeRows, decodeHealth, describeDeviceEdit, diffDeviceEdit, formatDecoded,
+  formatUptime, gatewaySummary, locationFields, locationProblem, modelIdProblem,
+  recentlyRestarted,
+  type NetworkStatus,
   type ProvisionedDevice,
 } from '../src/features/network/control'
 import { RegisterDeviceDialog } from '../src/features/network/RegisterDeviceDialog'
@@ -129,6 +134,7 @@ const untouchedForm = {
   name: 'Tank 3', group: 'Cooling', enabled: true,
   disableAdr: true, supportsClassC: false, maxDataRate: '3',
   attributes: attributeRows(storedDevice.attributes),
+  modelId: '',
   ...locationFields(storedDevice.location),
 }
 assert('an untouched form produces no edit at all', Object.keys(diffDeviceEdit(storedDevice, untouchedForm)).length === 0)
@@ -285,6 +291,140 @@ const consoleHtml = renderToString(h(DeviceConsole, {
 check('DeviceConsole opens in its loading state', consoleHtml, 'Reading the session')
 check('DeviceConsole offers settings before any session exists', consoleHtml, 'Settings')
 check('DeviceConsole shows the device it is about', consoleHtml, 'AABBCCDDEEFF0011')
+// The readings panel reads stored uplinks in an effect, so the first render says
+// it is reading rather than claiming the device has never reported.
+check('DeviceConsole starts the readings read rather than guessing', consoleHtml, 'Reading stored uplinks')
+
+// Device models: the vendor-formatter editor and the helpers around it.
+const modelsHtml = renderToString(h(DeviceModels))
+check('DeviceModels renders its heading', modelsHtml, 'Device models')
+check('DeviceModels offers a new model', modelsHtml, 'New model')
+assert('DeviceModels does not declare an empty fleet before the read',
+  !modelsHtml.includes('No device models yet'))
+
+assert('an empty model id asks for one', modelIdProblem('') !== '')
+assert('a one-character model id is refused', modelIdProblem('p') !== '')
+assert('an upper-case model id is refused', modelIdProblem('Probe') !== '')
+assert('a normal model id is accepted', modelIdProblem('cold-chain-probe-v2') === '')
+
+// A formatter's object becomes lines an operator can read. Nested and array
+// readings must be flattened rather than collapsed into "[object Object]", and a
+// null field must survive as a field.
+const flat = formatDecoded({ temperature: 21.5, channels: [{ rh: 40 }], alarm: null })
+assert('a scalar reading keeps its field', flat.some((l) => l.key === 'temperature' && l.value === '21.5'))
+assert('an array reading is flattened with indexed keys',
+  flat.some((l) => l.key === 'channels[0].rh' && l.value === '40'))
+assert('a null field is shown rather than dropped', flat.some((l) => l.key === 'alarm'))
+assert('nothing decoded means no lines', formatDecoded(undefined).length === 0)
+
+// The model association on a device edit, both directions: clearing is the case
+// a naive diff loses, and a model that cannot be detached leaves a device being
+// decoded by a formatter that no longer describes it.
+const storedWithModel: ProvisionedDevice = { ...storedDevice, model_id: 'cold-chain-probe-v2' }
+assert('a changed model shows up as an edit',
+  diffDeviceEdit(storedWithModel, { ...untouchedForm, modelId: 'other-probe' }).modelId === 'other-probe')
+assert('clearing a model shows up as an edit',
+  diffDeviceEdit(storedWithModel, { ...untouchedForm, modelId: '' }).modelId === '')
+assert('an unchanged model produces no edit',
+  Object.keys(diffDeviceEdit(storedWithModel, { ...untouchedForm, modelId: 'cold-chain-probe-v2' })).length === 0)
+assert('a device with no model and no choice produces no edit',
+  Object.keys(diffDeviceEdit(storedDevice, untouchedForm)).length === 0)
+assert('the save message names the model', describeDeviceEdit({ modelId: 'probe-2' }).includes('probe-2'))
+assert('the save message says what clearing costs',
+  describeDeviceEdit({ modelId: '' }).includes('no longer be decoded'))
+
+// ---------------------------------------------------------------------------
+// Network-server health: the values the status endpoint reports and the console
+// used to discard.
+// ---------------------------------------------------------------------------
+
+const health = (gateway_eui: string, online: boolean) => ({
+  gateway_eui, transport: 'semtech-udp', protocol: '2', address: '10.0.0.5:44321',
+  online, last_seen: '2026-11-17T10:00:00Z', packets: 41,
+  downlinks_sent: 3, downlink_errors: 0,
+})
+const liveStatus: NetworkStatus = {
+  uptime_seconds: 3720, region: 'EU868', net_id: '000013', downlink_power_dbm: 14,
+  gateways_total: 2, gateways_online: 1,
+  gateways: [health('AA55555555555555', true), health('BB55555555555555', false)],
+  transports: ['semtech-udp'],
+}
+
+// Uptime is read as "is this the long-running process or the one that just came
+// back", so the unit has to match the magnitude.
+assert('uptime over a day is read in days', formatUptime(90000) === '1d 1h')
+assert('uptime in hours keeps minutes', formatUptime(3720) === '1h 2m')
+assert('uptime under an hour keeps seconds', formatUptime(95) === '1m 35s')
+assert('a sub-minute uptime is still shown', formatUptime(7) === '7s')
+assert('an absent uptime says unknown rather than a number', formatUptime(-1) === 'Unknown')
+assert('a server up 14 seconds looks like a restart', recentlyRestarted(14))
+assert('a server up an hour does not', !recentlyRestarted(3600))
+
+// Gateway counts: the inventory and the live list are different populations, so
+// neither number alone is "how many gateways are online".
+const twoHeard = gatewaySummary(liveStatus, ['AA55555555555555', 'CC55555555555555'])
+assert('online comes from what the server hears', twoHeard.online === 1)
+// 2 the server has heard of, plus the one inventory row it never saw.
+assert('the total is the union, not the larger of the two', twoHeard.total === 3)
+assert('a gateway heard from is not counted twice',
+  gatewaySummary(liveStatus, ['aa55555555555555']).total === 2)
+const blindSummary = gatewaySummary(null, ['AA55555555555555', 'BB55555555555555'])
+assert('without the server the count is labelled as inventory', blindSummary.source === 'inventory')
+assert('and it claims nobody is online', blindSummary.online === 0 && blindSummary.total === 2)
+
+const serverHtml = renderToString(h(NetworkServerPanel, { status: liveStatus, inventoryIds: [] }))
+check('NetworkServerPanel shows the NetID to write into a device', serverHtml, '000013')
+check('NetworkServerPanel shows the band', serverHtml, 'EU868')
+check('NetworkServerPanel shows how long the server has been up', serverHtml, 'up 1h 2m')
+check('NetworkServerPanel names the transports it listens for', serverHtml, 'UDP forwarder')
+assert('NetworkServerPanel renders nothing when the server is unreachable',
+  renderToString(h(NetworkServerPanel, { status: null, inventoryIds: ['x'] })) === '')
+
+// Decode health. The two failure shapes have to read differently: a formatter
+// that will not compile is a fleet-wide fault affecting every frame from those
+// devices, and a frame the formatter refused is one bad frame.
+const brokenDecoding = {
+  enabled: true, frames_decoded: 90, frames_failed: 4,
+  compiled_formatters: 3, broken_formatters: 2,
+  broken_models: [
+    { model_id: 'aqi-pro', reason: 'syntax error: unexpected token' },
+    { model_id: 'meter-3', reason: 'script is empty' },
+  ],
+}
+assert('no decoder reported means no panel', decodeHealth(undefined) === null)
+const brokenHealth = decodeHealth(brokenDecoding)
+assert('broken formatters are reported', brokenHealth !== null && brokenHealth.broken.length === 2)
+assert('the warning names the models to go and fix',
+  brokenHealth !== null && brokenHealth.problem.includes('aqi-pro') && brokenHealth.problem.includes('meter-3'))
+assert('the warning carries the compiler message',
+  brokenHealth !== null && brokenHealth.problem.includes('unexpected token'))
+assert('the warning says the devices still look healthy',
+  brokenHealth !== null && brokenHealth.problem.includes('look healthy'))
+
+const noisyDecoding = { ...brokenDecoding, broken_formatters: 0, broken_models: [] }
+const noisyHealth = decodeHealth(noisyDecoding)
+assert('a rejected frame is not reported as a broken formatter',
+  noisyHealth !== null && !noisyHealth.problem.includes('will not run'))
+assert('a rejected frame still warns', noisyHealth !== null && noisyHealth.problem.includes('rejected'))
+
+const cleanDecoding = {
+  enabled: true, frames_decoded: 90, frames_failed: 0,
+  compiled_formatters: 3, broken_formatters: 0,
+}
+assert('a healthy fleet has nothing to warn about',
+  decodeHealth(cleanDecoding)?.problem === '')
+
+const decodeHtml = renderToString(h(DecodeHealthPanel, { decoding: brokenDecoding }))
+check('DecodeHealthPanel names the failing model', decodeHtml, 'aqi-pro')
+check('DecodeHealthPanel shows why it fails', decodeHtml, 'unexpected token')
+check('DecodeHealthPanel says decoding is running', decodeHtml, 'formatters are running')
+assert('DecodeHealthPanel renders nothing when there is no decoder',
+  renderToString(h(DecodeHealthPanel, { decoding: undefined })) === '')
+// A clean report must not read like an alarm, and must not overstate what the
+// counters cover.
+const cleanHtml = renderToString(h(DecodeHealthPanel, { decoding: cleanDecoding }))
+assert('a clean decode report shows no alert', !cleanHtml.includes('role="alert"'))
+check('the counters say what they cover', cleanHtml, 'Only models that have sent a')
 
 let failed = 0
 for (const [name, ok] of checks) {

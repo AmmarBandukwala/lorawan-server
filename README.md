@@ -35,6 +35,14 @@ WAN access, put it behind an authenticated TLS reverse proxy — do not publish 
 port directly. The gateway UDP port is the one listener that must be reachable
 from the network; restrict it to the gateway subnet at the facility firewall.
 
+The Overview's **Network server** panel reads its band, NetID, downlink power and
+uptime from the running process rather than from a config file, so what it shows
+is what the network is actually doing. The NetID is the value to write into an
+OTAA device so it accepts this network's join-accept. Gateway counts are
+reconciled between the inventory and what the server has heard from, and say
+which of the two they came from — "3 registered, presence unknown" is not the
+same claim as "2 of 3 reporting".
+
 ## Connect a gateway
 
 Point the packet forwarder at this host's UDP port **6858** (`server_port` in
@@ -59,6 +67,34 @@ curl -X POST http://127.0.0.1:8091/api/v1/devices \
   -d '{"dev_eui":"0011223344556677","app_key":"2B7E151628AED2A6ABF7158809CF4F3C","name":"Boiler sensor"}'
 ```
 
+## Readings and payload formatters
+
+A device's bytes mean nothing until something reads them. A **device model** is
+what says what a kind of sensor is, and it carries the payload formatter — the
+JavaScript a vendor prints in its datasheet — that turns those bytes into
+readings. Models live in the network server's database and are managed under
+**Models** in the console.
+
+The loop is: paste the vendor's script, paste a frame from the same datasheet,
+press **Test decode**, and only then save. The test runs the script in the editor
+rather than the stored one, so an edit can be proven before it reaches a fleet,
+and a script that will not compile is refused at save time with the parser's own
+message. Nothing is decoded by a formatter nobody has looked at.
+
+Then point devices at it: **Devices → a device → Settings → Device model**. The
+device's readings appear in its console panel. Changing or deleting a model
+affects new uplinks only — stored readings keep whatever decoded them, so history
+does not rewrite itself when a formatter is corrected.
+
+Devices with no model still work: they join, they report, and their frames are
+stored and shown as hex. A model decides how bytes are read, not whether the
+network accepts them.
+
+A formatter that stops working is otherwise invisible — the devices look healthy
+while every frame from them is stored as unreadable bytes — so the **Models** page
+also reports what the server actually managed to decode, and names the models
+whose script it could not compile along with the compiler's message.
+
 ## Try it without radio hardware
 
 `ns/cmd/nsbench` simulates a gateway and a class-A device against a running
@@ -74,6 +110,7 @@ cd ns && make smoke
 cd ns && make test      # network server: codec, region, engine, transport, API
 cd api && go test ./... # console API
 npm install && npm run lint && npm run build
+npm run smoke           # renders the console's components and checks what they say
 ```
 
 `ns/Makefile` runs the Go toolchain in Docker, so no local Go install is needed.

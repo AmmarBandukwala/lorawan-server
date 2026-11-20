@@ -342,6 +342,18 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .duty-row code { font-family: var(--mono); font-size: 9px; }
 .integration-panel .gateway-stats { margin-top: 14px; }
 
+/* Network-server identity and payload-decoding health. */
+.server-panel, .decode-panel { grid-column: 1 / -1; padding: 18px; }
+.uptime-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 999px; background: #f1f4f1; color: #7d877f; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.uptime-badge.recent { background: #fbeceb; color: #a34e43; }
+.panel-note { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: #909a93; font-size: 10px; line-height: 1.5; }
+.decode-counters { color: #7d877f; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.decode-counters em { color: #a34e43; font-style: normal; }
+.broken-list { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.broken-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: baseline; color: #556259; font-size: 10px; }
+.broken-row code { font-family: var(--mono); font-size: 9px; }
+.broken-row span { color: #909a93; }
+
 /* Device context: attributes and installed position.
  *
  * Rows rather than a free-text JSON box, because the people filling these in are
@@ -393,5 +405,70 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 @media (max-width: 1180px) {
   .device-view { grid-template-columns: 1fr; }
   .device-console { position: static; }
+}
+
+/* Device models: the sensor types on the network and their payload formatters.
+ *
+ * The editor's textarea is the one place in this console where a monospace face
+ * is not a stylistic choice: a vendor decoder is code, its indentation carries
+ * meaning to the person reading it against a datasheet, and a proportional font
+ * makes a misplaced brace genuinely harder to see. */
+.model-view { display: flex; flex-direction: column; gap: 13px; }
+.model-panel { display: flex; flex-direction: column; gap: 12px; padding: 15px 16px; }
+.model-list { display: flex; flex-direction: column; gap: 7px; }
+.model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--canvas); text-align: left; cursor: pointer; }
+.model-row:hover { border-color: #cfd8d1; background: #fff; }
+.model-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.model-row-main b { color: #344139; font-size: 11px; font-weight: 620; }
+.model-row-main small { color: #96a09a; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-row code { padding: 3px 6px; border-radius: 5px; background: #fff; border: 1px solid var(--line); color: #2c6a52; font: 9px var(--mono); }
+.model-codec { display: inline-flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 999px; background: #f1f4f1; color: #7d877f; font-size: 9px; white-space: nowrap; }
+.model-codec-on { background: var(--green-soft); color: var(--green); }
+/* The server tried to compile this script and failed. Louder than the neutral
+   badge, because a model can look fully configured here while every frame from
+   its devices is stored as unreadable bytes. */
+.model-codec-broken { background: #fbeceb; color: #a34e43; font-weight: 600; }
+
+.model-editor { display: flex; flex-direction: column; gap: 13px; padding: 16px; }
+.model-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }
+.model-form label, .model-test-controls label { display: flex; flex-direction: column; gap: 5px; color: #7a877e; font-size: 9px; font-weight: 600; }
+.model-form input, .model-form select, .model-test-controls input { padding: 8px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #344139; font: 11px var(--sans); }
+.model-form input:disabled { background: #f4f6f4; color: #8b958e; }
+.field-hint { color: #7a877e; font-size: 9px; font-weight: 400; line-height: 1.45; }
+.model-form .form-error { font-size: 9px; }
+
+.model-script { display: flex; flex-direction: column; gap: 6px; color: #7a877e; font-size: 9px; font-weight: 600; }
+.model-script code { color: #2c6a52; font: 9px var(--mono); }
+.model-script textarea { min-height: 240px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcfb; color: #2f3a33; font: 11px/1.6 var(--mono); resize: vertical; }
+.model-script textarea:focus { outline: 1px solid #b9c8c0; background: #fff; }
+
+.model-test { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; background: #fbfcfb; }
+.model-test-controls { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 10px; align-items: end; }
+.model-test-result { display: flex; flex-direction: column; gap: 7px; }
+.model-test-result b { display: flex; align-items: center; gap: 5px; color: var(--green); font-size: 10px; }
+.model-reading { display: flex; flex-wrap: wrap; gap: 6px; }
+.model-reading div { display: flex; flex-direction: column; gap: 1px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.model-reading span { color: #96a09a; font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.model-reading b { color: #344139; font: 11px var(--mono); }
+.model-delete-confirm { display: inline-flex; align-items: center; gap: 8px; color: #8d704f; font-size: 9px; }
+
+/* Decoded uplinks in the device console. The values are monospace so two
+ * readings line up vertically when an operator is comparing them. */
+.console-readings { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.console-readings .console-subheading { flex-direction: row; align-items: center; justify-content: space-between; }
+.console-reading { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcfb; }
+.console-reading-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.console-reading-top b { color: #4a564e; font-size: 10px; }
+.console-reading-top span { color: #96a09a; font: 9px var(--mono); }
+.console-reading-values { display: flex; flex-wrap: wrap; gap: 5px; }
+.console-reading-values span { display: inline-flex; align-items: baseline; gap: 5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; background: #fff; color: #344139; font: 10px var(--mono); }
+.console-reading-values small { color: #96a09a; font-size: 8px; letter-spacing: .04em; text-transform: uppercase; }
+.console-reading code { padding: 6px 8px; border-radius: 5px; background: #fff; border: 1px solid var(--line); color: #6b7770; font: 9px var(--mono); word-break: break-all; }
+.console-reading .form-error { font-size: 9px; }
+
+@media (max-width: 720px) {
+  .model-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .model-row code { display: none; }
+  .model-test-controls { grid-template-columns: minmax(0, 1fr); }
 }
 
