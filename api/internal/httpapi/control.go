@@ -48,6 +48,18 @@ type Controller interface {
 	Status(ctx context.Context) (json.RawMessage, error)
 	PatchDevice(ctx context.Context, devEUI string, p nsclient.DevicePatch) (json.RawMessage, error)
 	DeleteDevice(ctx context.Context, devEUI string) (json.RawMessage, error)
+
+	// Device models and decoded uplink history. Bodies and responses are raw JSON:
+	// a model carries a payload formatter whose only meaningful validator is the
+	// network server's JavaScript compiler, and re-encoding a request here would
+	// lose the detail that makes a rejection actionable.
+	ListModels(ctx context.Context) (json.RawMessage, error)
+	Model(ctx context.Context, modelID string) (json.RawMessage, error)
+	CreateModel(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error)
+	UpdateModel(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error)
+	DeleteModel(ctx context.Context, modelID string) (json.RawMessage, error)
+	TestModelDecode(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error)
+	Uplinks(ctx context.Context, devEUI string, limit int) (json.RawMessage, error)
 }
 
 // maxDownlinkBytes mirrors the network server's own limit. Enforcing it here too
@@ -277,6 +289,11 @@ type editDeviceRequest struct {
 	// read it as "not sent" and the position would be undeletable from the UI.
 	Attributes *map[string]string `json:"attributes"`
 	Location   json.RawMessage    `json:"location"`
+
+	// ModelID re-associates the device with a device model. A pointer so that
+	// "leave alone" and "no model now" remain different requests; the empty string
+	// is the clearing instruction.
+	ModelID *string `json:"model_id"`
 }
 
 // validateAttributes checks an attribute map against the same rules the network
@@ -370,7 +387,7 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 	if input.Name == nil && input.Group == nil && input.Enabled == nil &&
 		input.DisableADR == nil && input.SupportsClassC == nil &&
 		input.MaxDataRate == nil && input.MinDataRate == nil && input.MaxTxPower == nil &&
-		input.Attributes == nil && len(input.Location) == 0 {
+		input.Attributes == nil && len(input.Location) == 0 && input.ModelID == nil {
 		writeError(w, http.StatusBadRequest, ErrNoFieldsToChange)
 		return
 	}
@@ -379,6 +396,10 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if code := validateLocation(input.Location); code != "" {
+		writeError(w, http.StatusBadRequest, code)
+		return
+	}
+	if code := validateModelIDField(input.ModelID); code != "" {
 		writeError(w, http.StatusBadRequest, code)
 		return
 	}
@@ -429,6 +450,10 @@ func (s *Server) updateDevice(w http.ResponseWriter, r *http.Request) {
 		// field, a null and an object each mean, and re-encoding them here would
 		// collapse those three cases into one.
 		Location: input.Location,
+		// A pointer at "" clears the association, and omitempty on a pointer
+		// tests the pointer rather than the string, so the clearing instruction
+		// survives to the network server.
+		ModelID: trimOrNil(input.ModelID),
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), controlTimeout)

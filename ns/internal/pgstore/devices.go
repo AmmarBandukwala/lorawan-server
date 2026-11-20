@@ -16,7 +16,7 @@ const deviceColumns = `dev_eui, join_eui, name, enabled, activation_mode, app_ke
 	COALESCE(dev_addr, ''), nwk_s_key, app_s_key, next_join_nonce, used_dev_nonces,
 	max_data_rate, min_data_rate, max_tx_power, rx1_delay, rx2_data_rate,
 	rx2_frequency_hz, supports_class_c, disable_adr, device_group,
-	attributes, latitude, longitude, altitude`
+	COALESCE(model_id, ''), attributes, latitude, longitude, altitude`
 
 // DeviceByDevEUI implements engine.DeviceRepo.
 func (s *Store) DeviceByDevEUI(ctx context.Context, devEUI lorawan.EUI64) (*engine.Device, error) {
@@ -54,7 +54,7 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 		&devEUI, &joinEUI, &d.Name, &d.Enabled, &activationMode, &appKey,
 		&devAddr, &nwkSKey, &appSKey, &nextJoinNonce, &nonces,
 		&d.MaxDataRate, &d.MinDataRate, &d.MaxTxPower, &d.Rx1Delay, &d.Rx2DataRate,
-		&rx2FrequencyHz, &d.SupportsClassC, &d.DisableADR, &d.Group,
+		&rx2FrequencyHz, &d.SupportsClassC, &d.DisableADR, &d.Group, &d.ModelID,
 		&attrs, &latitude, &longitude, &altitude,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -175,11 +175,11 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 			dev_addr, nwk_s_key, app_s_key, next_join_nonce, used_dev_nonces,
 			max_data_rate, min_data_rate, max_tx_power, rx1_delay, rx2_data_rate,
 			rx2_frequency_hz, supports_class_c, disable_adr, device_group,
-			attributes, latitude, longitude, altitude, updated_at)
+			attributes, latitude, longitude, altitude, model_id, updated_at)
 		VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
 			$12, $13, $14, $15, $16, $17, $18, $19, $20,
-			$21::jsonb, $22, $23, $24, now())
+			$21::jsonb, $22, $23, $24, NULLIF($25, ''), now())
 		ON CONFLICT (dev_eui) DO UPDATE SET
 			join_eui          = EXCLUDED.join_eui,
 			name              = EXCLUDED.name,
@@ -204,12 +204,13 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 			latitude          = EXCLUDED.latitude,
 			longitude         = EXCLUDED.longitude,
 			altitude          = EXCLUDED.altitude,
+			model_id          = EXCLUDED.model_id,
 			updated_at        = now()`,
 		euiText(d.DevEUI), euiText(d.JoinEUI), d.Name, d.Enabled, activationMode, keyText(d.AppKey),
 		devAddr, keyText(d.NwkSKey), keyText(d.AppSKey), int64(d.NextJoinNonce), string(nonces),
 		d.MaxDataRate, d.MinDataRate, d.MaxTxPower, d.Rx1Delay, d.Rx2DataRate,
 		int64(d.Rx2FrequencyHz), d.SupportsClassC, d.DisableADR, d.Group,
-		attrs, lat, long, alt,
+		attrs, lat, long, alt, d.ModelID,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore: save device: %w", err)

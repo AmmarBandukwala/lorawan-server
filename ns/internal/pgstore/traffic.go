@@ -2,7 +2,9 @@ package pgstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -171,6 +173,100 @@ func (s *Store) RecordEvent(ctx context.Context, ev engine.Event) error {
 		return fmt.Errorf("pgstore: record event: %w", err)
 	}
 	return nil
+}
+
+// --- Decoded payloads -------------------------------------------------------
+
+// UpdateUplinkDecoded stores the payload formatter's reading of a frame that was
+// already written.
+//
+// The two writes are separate because decoding happens off the radio path: the
+// uplink is persisted the moment it is authenticated, and a formatter that takes
+// its time or throws cannot delay or damage that. Keying on the natural key
+// rather than a returned surrogate id keeps the Recorder interface unchanged.
+//
+// Exactly one of decoded/decodeError is non-empty, matching the schema's
+// ns_uplinks_decode_outcome check. Both empty is refused: it would clear a
+// previous reading and record nothing, which is what a caller that ignored the
+// formatter's error would do.
+func (s *Store) UpdateUplinkDecoded(ctx context.Context, devEUI lorawan.EUI64,
+	keyEpoch, fCntUp uint32, decoded []byte, decodeError string) error {
+
+	if len(decoded) == 0 && decodeError == "" {
+		return errors.New("pgstore: nothing to record as a decode outcome")
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE ns_uplinks SET decoded = $4::jsonb, decode_error = $5
+		WHERE dev_eui = $1 AND key_epoch = $2 AND f_cnt_up = $3`,
+		euiText(devEUI), int64(keyEpoch), int64(fCntUp),
+		nullableText(string(decoded)), nullableText(decodeError))
+	if err != nil {
+		return fmt.Errorf("pgstore: record decode outcome: %w", err)
+	}
+	return nil
+}
+
+// UplinkRow is a stored uplink as the console reads it: the raw frame plus the
+// formatter's reading of it, and the identifiers a device screen needs.
+type UplinkRow struct {
+	UplinkID    int64
+	ReceivedAt  time.Time
+	DevEUI      string
+	DevAddr     string
+	FCntUp      uint32
+	FPort       int
+	FRMPayload  []byte
+	RawPayload  []byte
+	GatewayID   string
+	FrequencyHz uint32
+	DataRate    int
+	RSSI        float64
+	SNR         float64
+	Retrans     bool
+	// Decoded is the formatter's output as JSON, and DecodeError why it refused.
+	// Both empty means no formatter is configured, which the console renders
+	// differently from a failure.
+	Decoded     []byte
+	DecodeError string
+}
+
+// RecentUplinks returns the newest uplinks, newest first, optionally for one
+// device. The decoded column comes back as raw JSON rather than a map: the
+// console renders it as-is, and re-encoding it through Go would reorder keys and
+// turn numbers the formatter produced into float64.
+func (s *Store) RecentUplinks(ctx context.Context, devEUI string, limit int) ([]UplinkRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT uplink_id, received_at, dev_eui, COALESCE(dev_addr, ''),
+		       f_cnt_up, f_port, frm_payload, raw_phy_payload,
+		       COALESCE(gateway_id, ''), frequency_hz, data_rate_index,
+		       rssi, snr, retransmission,
+		       COALESCE(decoded::text, ''), COALESCE(decode_error, '')
+		FROM ns_uplinks
+		WHERE ($1::text = '' OR dev_eui = $1)
+		ORDER BY received_at DESC, uplink_id DESC
+		LIMIT $2`, devEUI, limit)
+	if err != nil {
+		return nil, fmt.Errorf("pgstore: recent uplinks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []UplinkRow
+	for rows.Next() {
+		var r UplinkRow
+		var fPort int16
+		if err := rows.Scan(&r.UplinkID, &r.ReceivedAt, &r.DevEUI, &r.DevAddr,
+			&r.FCntUp, &fPort, &r.FRMPayload, &r.RawPayload, &r.GatewayID,
+			&r.FrequencyHz, &r.DataRate, &r.RSSI, &r.SNR, &r.Retrans,
+			&r.Decoded, &r.DecodeError); err != nil {
+			return nil, fmt.Errorf("pgstore: scan uplink: %w", err)
+		}
+		r.FPort = int(fPort)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // --- NULL mapping -----------------------------------------------------------

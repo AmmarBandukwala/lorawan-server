@@ -63,8 +63,14 @@ func newTestAPI(t *testing.T) (*apiServer, *engine.MemStore) {
 	if err != nil {
 		t.Fatalf("engine.New: %v", err)
 	}
-	return newAPIServer("127.0.0.1:0", testToken, eng, store.Store().Devices,
-		slog.New(slog.NewTextHandler(io.Discard, nil))), store
+	srv := newAPIServer("127.0.0.1:0", testToken, eng, store.Store().Devices,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// The in-memory store serves models too, so the model endpoints are exercised
+	// against the same repository the console would use. Traffic is deliberately
+	// left nil: MemStore has no decoded columns, and the endpoint's 503 path is
+	// worth covering.
+	srv.models = store.Store().Models
+	return srv, store
 }
 
 // do issues a request straight to the mux, without binding a port.

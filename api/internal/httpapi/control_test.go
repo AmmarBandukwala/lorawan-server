@@ -102,6 +102,54 @@ func (c *stubController) PatchDevice(_ context.Context, devEUI string, p nsclien
 	return json.RawMessage(`{"dev_eui":"0011223344556677","name":"edited"}`), nil
 }
 
+// The device-model and uplink-history calls. This stub exists for the control
+// tests that predate them; models_test.go has its own recording fake that
+// asserts on what the relay forwarded.
+func (c *stubController) ListModels(context.Context) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) Model(context.Context, string) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) CreateModel(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) UpdateModel(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) DeleteModel(context.Context, string) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) TestModelDecode(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) Uplinks(context.Context, string, int) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) stubbed() (json.RawMessage, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.resp != nil {
+		return c.resp, nil
+	}
+	return json.RawMessage(`{}`), nil
+}
+
 func (c *stubController) DeleteDevice(_ context.Context, devEUI string) (json.RawMessage, error) {
 	c.calls++
 	c.gotDevEUI = devEUI

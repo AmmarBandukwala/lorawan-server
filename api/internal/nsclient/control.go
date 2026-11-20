@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // Control-plane calls: queue a downlink, ask for a battery report, read a
@@ -99,6 +100,12 @@ type DevicePatch struct {
 	// three cases distinct all the way to the network server, which is where the
 	// distinction is acted on.
 	Location json.RawMessage `json:"location,omitempty"`
+
+	// ModelID re-associates the device with a device model, which is what decides
+	// how its uplinks are decoded. A pointer to string, so a nil means "leave
+	// alone" and a pointer at "" means "clear it" — omitempty tests the pointer,
+	// not the string, so clearing survives the trip.
+	ModelID *string `json:"model_id,omitempty"`
 }
 
 // PatchDevice changes a device's operator-facing settings without touching its
@@ -121,6 +128,72 @@ func (c *Client) DeleteDevice(ctx context.Context, devEUI string) (json.RawMessa
 // values over settings the operator never looked at.
 func (c *Client) Device(ctx context.Context, devEUI string) (json.RawMessage, error) {
 	return c.do(ctx, http.MethodGet, devicePath(devEUI), nil)
+}
+
+// Device models: what a kind of sensor is and how its bytes are decoded.
+//
+// These are relayed rather than re-implemented. A model carries a JavaScript
+// payload formatter, and the network server is the component that compiles it —
+// so it is the only place that can say whether a script is acceptable, and it
+// says so with the parser's own message. Re-validating here would either disagree
+// with that verdict or duplicate a JavaScript parser, and both are worse than a
+// relay.
+//
+// Bodies and responses are raw JSON for the same reason: the console's request is
+// already the network server's request, and re-encoding it would lose exactly the
+// detail that makes a rejection actionable.
+
+// ListModels returns every model without its formatter script.
+func (c *Client) ListModels(ctx context.Context) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodGet, "/models", nil)
+}
+
+// Model returns one model including its script.
+func (c *Client) Model(ctx context.Context, modelID string) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodGet, modelPath(modelID), nil)
+}
+
+// CreateModel installs a new model. A slug that exists is a 409 from the network
+// server, which is relayed rather than turned into an upsert: an operator who
+// means to replace a formatter should do it deliberately.
+func (c *Client) CreateModel(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodPost, modelPath(modelID), body)
+}
+
+// UpdateModel replaces a model, creating it when the slug is new.
+func (c *Client) UpdateModel(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodPut, modelPath(modelID), body)
+}
+
+// DeleteModel removes a model. Devices that referenced it survive and simply stop
+// being decoded, which is why the response counts them.
+func (c *Client) DeleteModel(ctx context.Context, modelID string) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodDelete, modelPath(modelID), nil)
+}
+
+// TestModelDecode runs a formatter against bytes without storing anything. The
+// answer is a verdict rather than a transport result, so a failing script still
+// arrives as a 200 with ok:false and must be relayed untouched.
+func (c *Client) TestModelDecode(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error) {
+	return c.do(ctx, http.MethodPost, modelPath(modelID)+"/decode", body)
+}
+
+// Uplinks returns recent stored uplinks, decoded where the device's model has a
+// formatter. devEUI may be empty for the whole network.
+func (c *Client) Uplinks(ctx context.Context, devEUI string, limit int) (json.RawMessage, error) {
+	path := "/uplinks?limit=" + strconv.Itoa(limit)
+	if devEUI != "" {
+		path += "&dev_eui=" + devEUI
+	}
+	return c.do(ctx, http.MethodGet, path, nil)
+}
+
+// modelPath builds a model route. The slug is validated by the caller before it
+// gets here, so no escaping is applied: a slug containing a slash would be a bug
+// in this service, and escaping it would hide that bug behind a 404 from the
+// network server.
+func modelPath(modelID string) string {
+	return "/models/" + modelID
 }
 
 // do performs a request against the API base URL and returns the body verbatim.

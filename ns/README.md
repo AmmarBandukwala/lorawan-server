@@ -46,6 +46,11 @@ to settle it.
 | `internal/engine` (aggregate) | Multi-gateway reception: copies of one frame are merged over a 200 ms window and answered through the best-SNR copy | M6 ✅ |
 | `internal/region` (registry) | The one list of implemented bands, read by the operator API and the console so neither can offer a band the server rejects | M6 ✅ |
 | `api` + Fieldnode UI | Device management in the console: read settings, patch them, revoke; relayed to the ns, which owns the row | M6 ✅ |
+| `internal/codec` | Payload formatters: a JavaScript runtime with no host access, bounded execution, and a registry that keeps one compiled formatter per model and can name the ones that fail | M6 ✅ |
+| `internal/pgstore` (models) | Device models — what kind of sensor a device is and the formatter its bytes are read with — plus uplinks stored alongside their decoded reading | M6 ✅ |
+| `cmd/ns` (models API) | Model CRUD with save-time compilation, a test-decode endpoint that runs an unsaved script against bytes the operator pastes, and uplink history with readings | M6 ✅ |
+| `api` + Fieldnode UI (models) | Models in the console: editor, test bench, device association, decoded readings per device. Relayed rather than re-implemented, because only the ns can say whether a script compiles | M6 ✅ |
+| Fieldnode UI (health) | What the ns already reports and the console used to drop: NetID and band to provision against, process uptime as a restart signal, live gateway presence reconciled with the inventory, and the models whose formatter fails at runtime | M6 ✅ |
 
 ## Structure conventions
 
@@ -400,6 +405,21 @@ with absolute timestamps so a cached response stays interpretable:
 ```sh
 curl -s localhost:8090/status | jq '.gateways[] | {gateway_eui, online, downlinks_sent, last_tx_ack_error}'
 ```
+
+`integrations.decoding` reports payload-formatter health, and names the models
+that fail rather than only counting them:
+
+```sh
+curl -s localhost:8090/status | jq '.integrations.decoding | {frames_failed, broken_models}'
+```
+
+A formatter that will not compile is the least visible fault here — the devices
+join, report on schedule and look healthy while every frame is stored as
+unreadable bytes — so `broken_models` carries each model ID with the compiler's
+own message. The counters are process-lifetime and cover frames that actually
+arrived: the registry learns a model is broken only by being asked to use it, so
+this is a report about traffic, not an audit of every model in the database.
+The console renders both on the Models page.
 
 `/ns -healthz` is the container health probe: the image is distroless, so the
 binary probes its own status endpoint rather than relying on a shell. In the

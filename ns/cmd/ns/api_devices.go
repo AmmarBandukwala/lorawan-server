@@ -32,9 +32,13 @@ type deviceView struct {
 	Enabled bool   `json:"enabled"`
 	// Activation tells an operator which credentials the device was given
 	// without revealing them.
-	Activation  string `json:"activation"`
-	DevAddr     string `json:"dev_addr,omitempty"` // ABP only
-	Group       string `json:"group,omitempty"`
+	Activation string `json:"activation"`
+	DevAddr    string `json:"dev_addr,omitempty"` // ABP only
+	Group      string `json:"group,omitempty"`
+	// ModelID names the device model this device is an instance of, and through
+	// it the payload formatter its uplinks are decoded with. Empty means no
+	// model: the device still reports and its raw payload still ships.
+	ModelID     string `json:"model_id,omitempty"`
 	DisableADR  bool   `json:"disable_adr"`
 	SupportsC   bool   `json:"supports_class_c"`
 	MaxDataRate int    `json:"max_data_rate"`
@@ -61,6 +65,7 @@ func newDeviceView(d *engine.Device) deviceView {
 		Enabled:     d.Enabled,
 		Activation:  "otaa",
 		Group:       d.Group,
+		ModelID:     d.ModelID,
 		DisableADR:  d.DisableADR,
 		SupportsC:   d.SupportsClassC,
 		MaxDataRate: d.MaxDataRate,
@@ -103,6 +108,12 @@ type provisionDeviceRequest struct {
 	// Group is a dashboard label. The engine ignores it, but it belongs to the
 	// device row so a device is not split across two tables.
 	Group string `json:"group"`
+
+	// ModelID associates the device with a device model, which is where its
+	// payload formatter comes from. It is validated against the model store by
+	// the handler rather than trusted: pointing a device at a model that does not
+	// exist would otherwise leave a console showing a formatter that never runs.
+	ModelID string `json:"model_id"`
 
 	// Attributes are operator-defined key/value pairs describing what the device
 	// is for. Keys are lower-cased and trimmed for the caller; see
@@ -243,6 +254,7 @@ func decodeDeviceRequest(w http.ResponseWriter, r *http.Request) (*engine.Device
 	}
 
 	dev.Name = name
+	dev.ModelID = strings.TrimSpace(req.ModelID)
 	dev.Group = group
 	dev.Enabled = true
 	if req.Enabled != nil {
@@ -333,11 +345,18 @@ func (s *apiServer) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
 			"dev_eui "+dev.DevEUI.String()+" is already provisioned; use PUT to replace it")
 		return
 	}
+	if msg := s.checkModelReference(r.Context(), dev.ModelID); msg != "" {
+		badRequest(w, msg)
+		return
+	}
 	if err := s.devices.SaveDevice(r.Context(), dev); err != nil {
 		s.log.Error("save a new device", "dev_eui", dev.DevEUI, "err", err)
 		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
 		return
 	}
+	// The device may have arrived with a model attached, which the decoder has
+	// never resolved before; a stale negative entry would leave it undecoded.
+	s.invalidateModel("")
 	s.log.Info("device provisioned", "dev_eui", dev.DevEUI, "name", dev.Name,
 		"activation", newDeviceView(dev).Activation, "enabled", dev.Enabled)
 	writeJSON(w, http.StatusCreated, newDeviceView(dev))
@@ -383,11 +402,16 @@ func (s *apiServer) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 	dev.NextJoinNonce = existing.NextJoinNonce
 	dev.UsedDevNonces = existing.UsedDevNonces
 
+	if msg := s.checkModelReference(r.Context(), dev.ModelID); msg != "" {
+		badRequest(w, msg)
+		return
+	}
 	if err := s.devices.SaveDevice(r.Context(), dev); err != nil {
 		s.log.Error("update a device", "dev_eui", pathEUI, "err", err)
 		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
 		return
 	}
+	s.invalidateModel("")
 	s.log.Info("device updated", "dev_eui", pathEUI, "name", dev.Name, "enabled", dev.Enabled)
 	writeJSON(w, http.StatusOK, newDeviceView(dev))
 }
@@ -405,8 +429,11 @@ func (s *apiServer) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 // typo in a name, which is what makes this usable at all: the keys are the one
 // thing this API never returns.
 type patchDeviceRequest struct {
-	Name           *string `json:"name"`
-	Group          *string `json:"group"`
+	Name  *string `json:"name"`
+	Group *string `json:"group"`
+	// ModelID re-associates the device with a model. An empty string clears the
+	// association, which stops the device being decoded without deleting anything.
+	ModelID        *string `json:"model_id"`
 	Enabled        *bool   `json:"enabled"`
 	DisableADR     *bool   `json:"disable_adr"`
 	SupportsClassC *bool   `json:"supports_class_c"`
@@ -489,11 +516,16 @@ func (s *apiServer) handlePatchDevice(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, msg)
 		return
 	}
+	if msg := s.checkModelReference(r.Context(), existing.ModelID); msg != "" {
+		badRequest(w, msg)
+		return
+	}
 	if err := s.devices.SaveDevice(r.Context(), existing); err != nil {
 		s.log.Error("patch a device", "dev_eui", pathEUI, "err", err)
 		writeError(w, http.StatusInternalServerError, msgDeviceSaveFailed)
 		return
 	}
+	s.invalidateModel("")
 	s.log.Info("device patched", "dev_eui", pathEUI, "name", existing.Name,
 		"enabled", existing.Enabled, "disable_adr", existing.DisableADR)
 	writeJSON(w, http.StatusOK, newDeviceView(existing))
@@ -514,6 +546,9 @@ func applyDevicePatch(dev *engine.Device, req patchDeviceRequest) string {
 			return "name must be at most 120 characters"
 		}
 		next.Name = name
+	}
+	if req.ModelID != nil {
+		next.ModelID = strings.TrimSpace(*req.ModelID)
 	}
 	if req.Group != nil {
 		group := strings.TrimSpace(*req.Group)
@@ -595,6 +630,7 @@ func (s *apiServer) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, msgDeviceDeleteFail)
 		return
 	}
+	s.invalidateModel("")
 	s.log.Info("device deleted", "dev_eui", devEUI)
 	w.WriteHeader(http.StatusNoContent)
 }

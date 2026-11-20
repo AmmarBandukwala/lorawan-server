@@ -42,7 +42,16 @@ type Device struct {
 	// Group is the dashboard's grouping label. The engine never reads it; it
 	// lives on the device row so a device has one home rather than being split
 	// between a protocol table and a dashboard table.
-	Group   string
+	Group string
+
+	// ModelID names the device model this device is an instance of, and through
+	// it the payload formatter used to decode its uplinks. Empty means no model:
+	// the device still reports and its raw payload still ships, it simply is not
+	// decoded. The engine does not read this -- decoding happens in the
+	// integration layer -- so a wrong or missing model can never affect the
+	// protocol path.
+	ModelID string
+
 	Enabled bool
 
 	// OTAA selects activation mode. When true the device joins with AppKey;
@@ -347,6 +356,18 @@ type UplinkRecord struct {
 	// learn that a confirmed downlink landed without polling the session.
 	ACK bool
 
+	// Decoded is the payload formatter's reading of FRMPayload, and DecodeError
+	// is why it refused. Both are filled by the integration layer before the
+	// record reaches storage, and neither is authoritative: the raw payload above
+	// is what the network heard.
+	//
+	// The three states are distinct on purpose. Decoded and DecodeError both nil
+	// means no formatter is configured; DecodeError set means one was configured
+	// and rejected this frame. Collapsing them would hide the only symptom of a
+	// device sending a malformed frame behind "nobody has a decoder".
+	Decoded     map[string]any
+	DecodeError string
+
 	// Receptions holds every gateway that heard this frame, the chosen one
 	// first. Coverage is a property of the network rather than of the one
 	// gateway that happened to win, and it is the only evidence a deployment has
@@ -446,11 +467,40 @@ type Recorder interface {
 	RecordEvent(ctx context.Context, e Event) error
 }
 
+// DeviceModel is the shape shared by every device of one kind: what it is, and
+// how to decode what it sends.
+//
+// CodecScript is vendor-supplied code. It is executed by internal/codec under a
+// deadline, with no I/O available, and it is not trusted.
+type DeviceModel struct {
+	ModelID     string
+	Name        string
+	Description string
+	CodecKind   string
+	CodecScript string
+
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ModelRepo persists device models. Optional on Store: a deployment that only
+// ever ships raw payloads needs none of it.
+type ModelRepo interface {
+	ListModels(ctx context.Context) ([]*DeviceModel, error)
+	ModelByID(ctx context.Context, modelID string) (*DeviceModel, error)
+	SaveModel(ctx context.Context, m *DeviceModel) error
+	DeleteModel(ctx context.Context, modelID string) error
+}
+
 // Store bundles the three persistence ports.
 type Store struct {
 	Devices  DeviceRepo
 	Sessions SessionRepo
 	Recorder Recorder
+
+	// Models persists device models and their payload formatters. Optional: a
+	// deployment that ships raw payloads needs no formatter.
+	Models ModelRepo
 
 	// Airtime persists the duty-cycle ledger. Optional: with the in-memory store
 	// there is nothing to persist to, and a single process holding the whole

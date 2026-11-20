@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/codec"
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
+	"github.com/fieldnode/lorawan-server/ns/internal/pgstore"
 )
 
 // apiServer is the application-facing HTTP API: submit a downlink, ask for a
@@ -33,9 +35,27 @@ import (
 type apiServer struct {
 	eng     *engine.Engine
 	devices engine.DeviceRepo
-	log     *slog.Logger
-	token   []byte
-	http    *http.Server
+	// models and traffic back the device-model and decoded-uplink endpoints.
+	// Either may be nil on a store that cannot serve it — the in-memory store has
+	// no model repository — and then those endpoints answer 503 rather than
+	// pretending to work.
+	models  engine.ModelRepo
+	traffic TrafficReader
+	// invalidate tells the live payload decoder that a model changed, so an edit
+	// takes effect on the next frame instead of after a restart.
+	invalidate    func(modelID string)
+	codecOpts     codec.Options
+	decodeTimeout time.Duration
+
+	log   *slog.Logger
+	token []byte
+	http  *http.Server
+}
+
+// TrafficReader is the read side of stored traffic. pgstore implements it; the
+// in-memory store keeps its records in engine shapes and is served elsewhere.
+type TrafficReader interface {
+	RecentUplinks(ctx context.Context, devEUI string, limit int) ([]pgstore.UplinkRow, error)
 }
 
 // maxDownlinkBytes is the largest application payload accepted. LoRaWAN 1.0.x
@@ -62,6 +82,17 @@ func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceR
 	mux.HandleFunc("PUT /api/v1/devices/{dev_eui}", s.requireAuth(s.handleUpdateDevice))
 	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", s.requireAuth(s.handlePatchDevice))
 	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", s.requireAuth(s.handleDeleteDevice))
+
+	// Device models and decoded traffic. A model carries vendor-supplied
+	// JavaScript, so these sit behind the same token as provisioning: being able
+	// to install a formatter is being able to run code on this server.
+	mux.HandleFunc("GET /api/v1/models", s.requireAuth(s.handleListModels))
+	mux.HandleFunc("GET /api/v1/models/{model_id}", s.requireAuth(s.handleGetModel))
+	mux.HandleFunc("POST /api/v1/models/{model_id}", s.requireAuth(s.handleCreateModel))
+	mux.HandleFunc("PUT /api/v1/models/{model_id}", s.requireAuth(s.handleUpdateModel))
+	mux.HandleFunc("DELETE /api/v1/models/{model_id}", s.requireAuth(s.handleDeleteModel))
+	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", s.requireAuth(s.handleTestModelDecode))
+	mux.HandleFunc("GET /api/v1/uplinks", s.requireAuth(s.handleListUplinks))
 
 	s.http = &http.Server{
 		Addr:              addr,

@@ -22,6 +22,7 @@ type MemStore struct {
 	mu        sync.RWMutex
 	devices   map[lorawan.EUI64]*Device
 	sessions  map[lorawan.EUI64]*Session
+	models    map[string]*DeviceModel
 	uplinks   []UplinkRecord
 	downlinks []DownlinkRecord
 	events    []Event
@@ -33,13 +34,14 @@ func NewMemStore() *MemStore {
 	return &MemStore{
 		devices:   map[lorawan.EUI64]*Device{},
 		sessions:  map[lorawan.EUI64]*Session{},
+		models:    map[string]*DeviceModel{},
 		maxEvents: DefaultEventHistory,
 	}
 }
 
 // Store wires the MemStore as the engine's Store value.
 func (m *MemStore) Store() Store {
-	return Store{Devices: m, Sessions: m, Recorder: m}
+	return Store{Devices: m, Sessions: m, Recorder: m, Models: m}
 }
 
 // DeviceByDevEUI implements DeviceRepo.

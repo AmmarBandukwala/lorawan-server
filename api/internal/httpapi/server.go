@@ -95,6 +95,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", s.updateDevice)
 	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", s.deleteDevice)
 	mux.HandleFunc("GET /api/v1/status", s.getStatus)
+
+	// Device models and decoded uplink history, relayed to the network server.
+	// A model owns the payload formatter that turns a device's bytes into
+	// readings, and only the network server can say whether a script compiles —
+	// so these pass through rather than being re-modelled here.
+	mux.HandleFunc("GET /api/v1/models", s.listModels)
+	mux.HandleFunc("POST /api/v1/models/{model_id}", s.createModel)
+	mux.HandleFunc("GET /api/v1/models/{model_id}", s.getModel)
+	mux.HandleFunc("PUT /api/v1/models/{model_id}", s.updateModel)
+	mux.HandleFunc("DELETE /api/v1/models/{model_id}", s.deleteModel)
+	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", s.testModelDecode)
+	mux.HandleFunc("GET /api/v1/uplinks", s.listUplinks)
 	return withSecurityHeaders(mux)
 }
 

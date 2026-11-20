@@ -95,6 +95,19 @@ const (
 	// type, not a number to correct.
 	ErrLocationIncomplete = "location_needs_both_latitude_and_longitude"
 	ErrLocationRange      = "latitude_longitude_or_altitude_out_of_range"
+
+	// Device-model relays. A model's payload formatter is compiled by the network
+	// server, so a rejected script arrives as a 400 whose detail is the parser's
+	// own message; these codes name the action that failed, and the detail is what
+	// the operator reads.
+	ErrModelIDInvalid    = "model_id_must_be_2_to_64_lowercase_letters_digits_dash_or_underscore"
+	ErrModelTooLarge     = "payload_formatter_too_large"
+	ErrModelListFailed   = "device_model_query_failed"
+	ErrModelSaveFailed   = "device_model_save_failed"
+	ErrModelDeleteFailed = "device_model_delete_failed"
+	ErrModelTestFailed   = "device_model_test_failed"
+	ErrUplinkListFailed  = "uplink_history_query_failed"
+	ErrLimitOutOfRange   = "limit_must_be_between_1_and_500"
 )
 
 // Input limits. Each is enforced here and mirrored by the database schema; the

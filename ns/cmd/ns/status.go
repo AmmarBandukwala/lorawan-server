@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/codec"
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
@@ -224,6 +225,27 @@ type integrationView struct {
 	Failed    int64    `json:"delivery_failures"`
 	Dropped   int64    `json:"dropped"`
 	Queued    int64    `json:"queued"`
+
+	// Decoding is absent when no device model has a formatter configured, so a
+	// deployment that ships raw payloads does not show a wall of zeros that looks
+	// like a fault.
+	Decoding *decodingView `json:"decoding,omitempty"`
+}
+
+// decodingView is the payload-formatter health. BrokenFormatters is the number
+// worth watching: it means a model's vendor script does not compile, so every
+// frame from every device on that model is going out undecoded, and the frames
+// themselves look perfectly healthy.
+type decodingView struct {
+	Enabled          bool  `json:"enabled"`
+	FramesDecoded    int64 `json:"frames_decoded"`
+	FramesFailed     int64 `json:"frames_failed"`
+	Compiled         int   `json:"compiled_formatters"`
+	BrokenFormatters int   `json:"broken_formatters"`
+	// BrokenModels names them. A count says something is wrong; the model ID and
+	// the compiler's message say where to look, which is what makes the number
+	// worth putting on a page at all.
+	BrokenModels []codec.BrokenModel `json:"broken_models,omitempty"`
 }
 
 // handleStatus reports timestamps, never relative strings: a cached or proxied
@@ -294,13 +316,24 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.integr != nil {
 		st := s.integr.Stats()
-		body.Integrations = &integrationView{
+		view := &integrationView{
 			Sinks:     s.integr.Sinks(),
 			Published: st.Published,
 			Failed:    st.Failed,
 			Dropped:   st.Dropped,
 			Queued:    st.Queued,
 		}
+		if fmts := s.integr.FormatterStats(); fmts != nil {
+			view.Decoding = &decodingView{
+				Enabled:          s.integr.DecodingEnabled(),
+				FramesDecoded:    st.Decoded,
+				FramesFailed:     st.DecodeErrors,
+				Compiled:         fmts.Compiled,
+				BrokenFormatters: fmts.Broken,
+				BrokenModels:     fmts.BrokenModels,
+			}
+		}
+		body.Integrations = view
 	}
 	if !cfg.DisableDutyCycleEnforcement {
 		body.DutyCycle = &dutyCycleView{

@@ -67,6 +67,14 @@ type config struct {
 	// provisioning concern of the Fieldnode API, not of this process.
 	webhookToken string
 
+	// codecTimeout bounds one whole decode step (store lookups plus execution)
+	// and codecExecution bounds the JavaScript itself. The outer one is larger: a
+	// formatter allowed 100 ms should not be killed because the database took
+	// 40 ms to answer, and a formatter that overruns its own budget should be
+	// reported as a formatter problem rather than an unattributable timeout.
+	codecTimeout   time.Duration
+	codecExecution time.Duration
+
 	// apiToken authenticates the application API (downlink submission and
 	// session reads). Empty disables the API entirely rather than leaving it
 	// open: an unauthenticated endpoint that can transmit radio frames on a LAN
@@ -183,6 +191,20 @@ func loadConfig() (config, error) {
 	if len(cfg.webhookURLs) > 0 && cfg.webhookToken == "" {
 		slog.Warn("NS_WEBHOOK_TOKEN is not set: the receiver cannot tell these " +
 			"events from anything else on the network")
+	}
+
+	// Payload formatters are vendor-supplied code, so both bounds are settable:
+	// a deployment running a genuinely heavy decoder needs to raise the inner one
+	// without weakening the outer guard that protects the worker.
+	cfg.codecExecution = envDuration("NS_CODEC_TIMEOUT", 100*time.Millisecond)
+	cfg.codecTimeout = envDuration("NS_CODEC_DEADLINE", 2*time.Second)
+	if cfg.codecExecution <= 0 || cfg.codecTimeout <= 0 {
+		return cfg, errors.New("NS_CODEC_TIMEOUT and NS_CODEC_DEADLINE must both be positive")
+	}
+	if cfg.codecExecution >= cfg.codecTimeout {
+		return cfg, fmt.Errorf("NS_CODEC_TIMEOUT (%v) must be shorter than "+
+			"NS_CODEC_DEADLINE (%v): the script budget has to fit inside the step budget",
+			cfg.codecExecution, cfg.codecTimeout)
 	}
 
 	cfg.apiToken = strings.TrimSpace(os.Getenv("NS_API_TOKEN"))

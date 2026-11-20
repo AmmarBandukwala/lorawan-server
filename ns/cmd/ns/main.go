@@ -31,11 +31,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/fieldnode/lorawan-server/ns/internal/codec"
 	"github.com/fieldnode/lorawan-server/ns/internal/engine"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/lbs"
 	"github.com/fieldnode/lorawan-server/ns/internal/gateway/semtech"
 	"github.com/fieldnode/lorawan-server/ns/internal/integration"
+	"github.com/fieldnode/lorawan-server/ns/internal/lorawan"
 	"github.com/fieldnode/lorawan-server/ns/internal/pgstore"
 )
 
@@ -213,6 +215,19 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	if cfg.apiToken != "" {
 		api = newAPIServer(cfg.apiAddr, cfg.apiToken, eng, store.Devices,
 			log.With("component", "api"))
+		// Device models and decoded traffic come from the same store, when it can
+		// serve them. The in-memory store can hold models but has no decoded
+		// columns, so the endpoints report 503 rather than returning empty lists
+		// that look like a quiet network.
+		api.models = store.Models
+		if reader, ok := gatewayStore.(TrafficReader); ok {
+			api.traffic = reader
+		}
+		api.codecOpts = codec.Options{Timeout: cfg.codecExecution}
+		api.decodeTimeout = cfg.codecTimeout
+		if integrations != nil {
+			api.invalidate = integrations.InvalidateDecoder
+		}
 		if err := api.Start(); err != nil {
 			_ = srv.Close()
 			if station != nil {
@@ -273,13 +288,16 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 
 // newRecorder wraps the store's recorder with the integration dispatcher.
 //
-// With no endpoints configured it returns the store untouched, so a deployment
-// that does not use webhooks pays nothing: no goroutine, no channel, no
-// indirection on the radio path.
+// With neither webhook endpoints nor device models it returns the store
+// untouched, so a deployment that uses neither pays nothing: no goroutine, no
+// channel, no indirection on the radio path.
 func newRecorder(store engine.Store, cfg config, log *slog.Logger) (
 	engine.Store, *integration.Dispatcher, func(), error) {
 
-	if len(cfg.webhookURLs) == 0 {
+	// Decoding needs somewhere to read devices and models from. A store without a
+	// model repository cannot decode, which is the in-memory case.
+	canDecode := store.Models != nil && store.Devices != nil
+	if len(cfg.webhookURLs) == 0 && !canDecode {
 		return store, nil, func() {}, nil
 	}
 	sinks := make([]integration.Sink, 0, len(cfg.webhookURLs))
@@ -296,12 +314,44 @@ func newRecorder(store engine.Store, cfg config, log *slog.Logger) (
 	d := integration.New(store.Recorder, sinks, integration.Config{
 		Logger: log.With("component", "integration"),
 	})
+	if canDecode {
+		// The persister is the same store the dispatcher wraps, when it can write
+		// decoded columns. The in-memory store cannot, and there decoding still
+		// happens for the webhooks.
+		persist, _ := store.Recorder.(integration.DecodePersister)
+		decoder := integration.NewPayloadDecoder(modelSource{store.Devices, store.Models},
+			integration.DecoderConfig{
+				Timeout: cfg.codecTimeout,
+				Logger:  log.With("component", "codec"),
+				Options: codec.Options{Timeout: cfg.codecExecution},
+			})
+		d.EnableDecoding(decoder, persist)
+		log.Info("payload formatters enabled", "models", canDecode)
+	}
 	wrapped := store
 	wrapped.Recorder = d
-	log.Info("integrations enabled", "sinks", d.Sinks())
+	if len(sinks) > 0 {
+		log.Info("integrations enabled", "sinks", d.Sinks())
+	}
 	// sync.OnceFunc so the deferred close and the explicit shutdown path cannot
 	// both try to drain the queue.
 	return wrapped, d, sync.OnceFunc(func() { _ = d.Close() }), nil
+}
+
+// modelSource adapts the engine's two repositories to the narrower port the
+// decoder reads. Defining it here keeps the integration package free of any
+// assumption about which store it is given.
+type modelSource struct {
+	devices engine.DeviceRepo
+	models  engine.ModelRepo
+}
+
+func (m modelSource) DeviceByDevEUI(ctx context.Context, eui lorawan.EUI64) (*engine.Device, error) {
+	return m.devices.DeviceByDevEUI(ctx, eui)
+}
+
+func (m modelSource) ModelByID(ctx context.Context, id string) (*engine.DeviceModel, error) {
+	return m.models.ModelByID(ctx, id)
 }
 
 // openStore returns the engine store plus its release function. An empty DSN
