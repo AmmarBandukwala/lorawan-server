@@ -11,6 +11,7 @@ node_modules
 dist
 dist-ssr
 *.local
+# `go build ./cmd/api` run from inside api/ drops a binary here.
 /api/api
 .env
 !.env.example

@@ -137,7 +137,7 @@ is worth writing down in the file.
    channel to *that device's* plan (`region.WithUserChannels`), which ADR and
    downlink scheduling then honour. Channel masks implement the per-band
    `ChMaskCntl` readings, including US915's.
-5. **M5 — integration + application API** (done, except the UI): decoded uplinks
+5. **M5 — integration + application API** (done): decoded uplinks
    and join acceptances leave the server through `internal/integration`, and
    applications submit downlinks over an authenticated HTTP API in `cmd/ns`.
    The dispatcher implements `engine.Recorder` and writes through to the store
