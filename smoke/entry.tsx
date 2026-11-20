@@ -2,7 +2,7 @@ import { createElement as h } from 'react'
 import { renderToString } from 'react-dom/server'
 import App from '../src/App'
 import { FALLBACK_REGIONS } from '../src/features/network/constants'
-import { DeviceHeader, DeviceTable, GatewayCard, ActivityItem, SettingsForm } from '../src/features/network/components'
+import { ActivityItem, DeviceHeader, DeviceTable, GatewayCard, PageHeadingAction, SettingsForm } from '../src/features/network/components'
 import { DeviceConsole } from '../src/features/network/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/DeviceSettings'
 import { DeviceModels } from '../src/features/network/DeviceModels'
@@ -16,9 +16,9 @@ import {
   type ProvisionedDevice,
 } from '../src/features/network/control'
 import { RegisterDeviceDialog } from '../src/features/network/RegisterDeviceDialog'
-import { DEVICE_FILTERS, UNASSIGNED_GROUP } from '../src/features/network/constants'
+import { DEVICE_FILTERS, endpointFor, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
-import type { Device, FacilitySettings, GatewayRecord, NetworkEvent } from '../src/features/network/types'
+import type { Device, FacilitySettings, GatewayRecord, NetworkEvent, View } from '../src/features/network/types'
 
 const noop = () => {}
 const device: Device = { id: '1', name: 'Tank 3', eui: 'AABBCCDDEEFF0011', group: 'Cooling', gateway: 'GW-1', lastSeen: '2 minutes ago', battery: 88, state: 'Online', rssi: -71 }
@@ -425,6 +425,70 @@ assert('DecodeHealthPanel renders nothing when there is no decoder',
 const cleanHtml = renderToString(h(DecodeHealthPanel, { decoding: cleanDecoding }))
 assert('a clean decode report shows no alert', !cleanHtml.includes('role="alert"'))
 check('the counters say what they cover', cleanHtml, 'Only models that have sent a')
+
+// ---------------------------------------------------------------------------
+// Per-view heading action.
+//
+// "Add device" used to render on every view except Settings and Models, so the
+// Gateways page offered a device form while its own first panel explains that
+// gateways are not registered here, and Events offered it for no reason at all.
+// ---------------------------------------------------------------------------
+
+const deviceViews: View[] = ['Overview', 'Devices']
+const otherViews: View[] = ['Gateways', 'Events', 'Models', 'Settings']
+for (const view of deviceViews) {
+  assert(`the heading offers device registration on ${view}`, viewOffersDeviceRegistration(view))
+}
+for (const view of otherViews) {
+  assert(`the heading offers no device registration on ${view}`, !viewOffersDeviceRegistration(view))
+}
+
+assert('the Gateways heading renders no primary action at all',
+  renderToString(h(PageHeadingAction, {
+    view: 'Gateways', canProvision: true, onAddDevice: noop,
+  })) === '')
+assert('the Events heading renders no primary action at all',
+  renderToString(h(PageHeadingAction, {
+    view: 'Events', canProvision: true, onAddDevice: noop,
+  })) === '')
+const devicesHeading = renderToString(h(PageHeadingAction, {
+  view: 'Devices', canProvision: true, onAddDevice: noop,
+}))
+check('the Devices heading still offers Add device', devicesHeading, 'Add device')
+// Disabled rather than hidden: the action stays discoverable, and the connection
+// notice above the heading is what explains why it cannot be used yet.
+const offlineHeading = renderToString(h(PageHeadingAction, {
+  view: 'Devices', canProvision: false, onAddDevice: noop,
+}))
+assert('the action is disabled rather than hidden while the API is unreachable',
+  offlineHeading.includes('Add device') && offlineHeading.includes('disabled'))
+// The Overview is what App renders first, so this checks the wiring rather than
+// only the component.
+check('the Overview page offers Add device', shell, 'Add device')
+
+// The address a gateway is pointed at. One function builds it so the card and
+// the clipboard can never disagree.
+assert('a station endpoint carries the scheme and the path',
+  endpointFor('basic-station', '10.0.0.4', '30001') === 'wss://10.0.0.4:30001/updates')
+assert('a forwarder endpoint is a bare host and port',
+  endpointFor('semtech-udp', '10.0.0.4', '6858') === '10.0.0.4:6858')
+assert('an unknown port is left off rather than rendered as :0',
+  endpointFor('semtech-udp', '10.0.0.4', 0) === '10.0.0.4')
+
+const copyPanelHtml = renderToString(h(GatewayConnectPanel, {
+  listeners: [{
+    transport: 'semtech-udp', bind_addr: '0.0.0.0', port: 6858,
+    host_wildcard: true, secured: false,
+  }, {
+    transport: 'basic-station', bind_addr: '0.0.0.0', port: 30001,
+    host_wildcard: true, secured: true,
+  }],
+}))
+check('the connect panel offers to copy the forwarder endpoint', copyPanelHtml, '6858')
+check('the connect panel offers to copy the station endpoint', copyPanelHtml, 'wss://')
+assert('each endpoint has its own copy button, so nothing has to be guessed',
+  copyPanelHtml.split('copy-endpoint').length - 1 === 2)
+check('a copy button names the endpoint it copies', copyPanelHtml, 'Copy the UDP forwarder endpoint')
 
 let failed = 0
 for (const [name, ok] of checks) {

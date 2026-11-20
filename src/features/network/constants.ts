@@ -1,4 +1,4 @@
-import type { DeviceFilter } from './types'
+import type { DeviceFilter, View } from './types'
 
 /** Values the interface repeats, gathered so they can be changed once. */
 
@@ -88,4 +88,39 @@ const TRANSPORT_LABELS: Record<string, string> = {
 export function transportLabel(transport: string): string {
   if (transport === '') return 'transport unknown'
   return TRANSPORT_LABELS[transport] ?? transport
+}
+
+/**
+ * The address a gateway should be pointed at, for one transport.
+ *
+ * Lives here rather than beside the panel that renders it because a component
+ * file may export only components — mixing in a function costs Fast Refresh for
+ * the whole module. It is also where the string is defined once: the card and
+ * the clipboard button must show and copy the identical address, and a copy that
+ * silently differs from the display is worse than no copy button, because it
+ * looks like it worked.
+ *
+ * Basics Station is a WebSocket endpoint and needs its scheme and path; the
+ * Semtech forwarder takes a bare host and port for its `server_path`.
+ */
+export function endpointFor(transport: string, host: string, port?: string | number): string {
+  const suffix = port && Number(port) > 0 ? `:${port}` : ''
+  return transport === 'basic-station'
+    ? `wss://${host}${suffix}/updates`
+    : `${host}${suffix}`
+}
+
+/**
+ * Which views offer device registration as their primary action.
+ *
+ * This used to be an exclusion list — `view !== 'Settings' && view !== 'Models'`
+ * — which meant every view inherited the button unless someone remembered to
+ * exclude it. The Gateways page consequently carried a primary "Add device"
+ * action while its own first panel explains that gateways are not registered in
+ * this console at all, and the Events page offered it for no reason. An
+ * exclusion list fails silently every time a view is added; naming the views
+ * that have the action fails visibly.
+ */
+export function viewOffersDeviceRegistration(view: View): boolean {
+  return view === 'Overview' || view === 'Devices'
 }

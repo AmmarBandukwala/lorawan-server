@@ -1,5 +1,6 @@
-import { ArrowUpRight, CircleCheck, Info, RadioTower, ShieldAlert } from 'lucide-react'
-import { transportLabel } from './constants'
+import { useState } from 'react'
+import { ArrowUpRight, Check, CircleCheck, Copy, Info, RadioTower, ShieldAlert } from 'lucide-react'
+import { endpointFor, transportLabel } from './constants'
 import type { GatewayHealth, GatewayListener } from './control'
 
 /**
@@ -71,13 +72,12 @@ export function GatewayConnectPanel({ listeners, transports }: {
               <b>{transportLabel(row.transport)}</b>
             </div>
 
-            {row.transport === 'basic-station'
-              ? <Endpoint
-                value={`wss://${host}${row.port ? `:${row.port}` : ''}/updates`}
-                note="The station’s LNS endpoint. Use wss:// when a TLS proxy sits in front of this server, ws:// when nothing does." />
-              : <Endpoint
-                value={`${host}${row.port ? `:${row.port}` : ''}`}
-                note="The packet forwarder’s server_path address and port — in global_conf.json for the classic forwarder, in the LNS server settings for an sx1302 one." />}
+            <Endpoint
+              transport={row.transport}
+              value={endpointFor(row.transport, host, row.port)}
+              note={row.transport === 'basic-station'
+                ? 'The station’s LNS endpoint. Use wss:// when a TLS proxy sits in front of this server, ws:// when nothing does.'
+                : 'The packet forwarder’s server_path address and port — in global_conf.json for the classic forwarder, in the LNS server settings for an sx1302 one.'} />
 
             {row.wildcard && <p className="connect-note"><Info size={13} />
               The server listens on every interface, so the host above is the one this page was loaded from. Use the address your gateway can actually reach.</p>}
@@ -98,11 +98,56 @@ export function GatewayConnectPanel({ listeners, transports }: {
   )
 }
 
-function Endpoint({ value, note }: { value: string; note: string }) {
+/**
+ * One endpoint, with the address and a way to put it on the clipboard.
+ *
+ * The copy lives here rather than in the page heading because this is where it
+ * is unambiguous: a server listening for both UDP and station traffic has two
+ * different endpoints, and a single "copy endpoint" button would have to guess
+ * which one the operator meant.
+ *
+ * When the clipboard is unavailable the panel says so and tells the operator to
+ * select the text. Browsers only expose it in a secure context, so a console
+ * reached over a plain-HTTP LAN address genuinely cannot use it — reporting
+ * success in that case would be the worst outcome available, because the
+ * operator would paste nothing into the gateway's config and go looking for a
+ * radio problem.
+ */
+function Endpoint({ transport, value, note }: { transport: string; value: string; note: string }) {
+  const [copied, setCopied] = useState<'idle' | 'done' | 'unavailable'>('idle')
+
+  async function copy() {
+    // Read defensively: navigator.clipboard is absent entirely outside a secure
+    // context, and writeText rejects if the document has lost focus.
+    if (!navigator.clipboard?.writeText) {
+      setCopied('unavailable')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied('done')
+    } catch {
+      setCopied('unavailable')
+    }
+  }
+
   return (
     <div className="connect-endpoint">
-      <code>{value}</code>
+      <div className="connect-endpoint-line">
+        <code>{value}</code>
+        <button className="copy-endpoint" type="button" onClick={() => void copy()}
+          aria-label={`Copy the ${transportLabel(transport)} endpoint`}>
+          {copied === 'done' ? <Check size={12} /> : <Copy size={12} />}
+          {copied === 'done' ? 'Copied' : 'Copy'}
+        </button>
+      </div>
       <span>{note}</span>
+      {copied === 'unavailable' && (
+        <p className="connect-note">
+          <Info size={13} /> This browser will not hand out the clipboard over an
+          insecure origin. Select the address above and copy it manually.
+        </p>
+      )}
     </div>
   )
 }

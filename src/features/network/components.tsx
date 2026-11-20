@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react'
 import {
-  ArrowDown, ArrowUpRight, Check, ChevronDown, CircleCheck, Clock3, Radio,
+  ArrowDown, ArrowUpRight, Check, ChevronDown, CircleCheck, Clock3, Plus, Radio,
   RadioTower, Search, TriangleAlert,
 } from 'lucide-react'
-import { DEVICE_FILTERS, LOW_BATTERY_PERCENT, SIGNAL_QUALITY, transportLabel, UNASSIGNED_GROUP } from './constants'
+import { DEVICE_FILTERS, LOW_BATTERY_PERCENT, SIGNAL_QUALITY, transportLabel, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from './constants'
 import type { GatewayHealth } from './control'
 import type { Device, DeviceFilter, FacilitySettings, GatewayRecord, GroupFilter, NetworkEvent, View } from './types'
 
@@ -96,3 +96,27 @@ export function ActivityItem({ event }: { event: NetworkEvent }) {
 export function SettingsForm({ draft, setDraft, onSubmit, saving, error, message, disabled, regions, regionsAreFallback }: { draft: FacilitySettings; setDraft: (settings: FacilitySettings) => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; saving: boolean; error: string; message: string; disabled: boolean; regions: readonly string[]; regionsAreFallback?: boolean }) {
   return <section className="panel settings-view"><div className="panel-heading"><div><h2>Facility profile</h2><p>These values are stored in the local database.</p></div></div><form className="settings-form" onSubmit={onSubmit}><label>Facility name<input required maxLength={120} value={draft.facilityName} onChange={(event) => setDraft({ ...draft, facilityName: event.target.value })} /></label><label>LoRaWAN region<select required value={draft.region} onChange={(event) => setDraft({ ...draft, region: event.target.value })}><option value="">Select region</option>{regions.map((region) => <option key={region} value={region}>{region}</option>)}</select>{regionsAreFallback && <small className="field-hint">The network server could not be reached, so this list is the console’s own. The band the network enforces comes from its NS_REGION setting.</small>}</label><label>Operator display name<input required maxLength={120} value={draft.operatorName} onChange={(event) => setDraft({ ...draft, operatorName: event.target.value })} /></label><label>Operator role<input required maxLength={80} value={draft.operatorRole} onChange={(event) => setDraft({ ...draft, operatorRole: event.target.value })} /></label>{error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}<div className="modal-actions"><button className="button button-primary" type="submit" disabled={disabled || saving}><Check size={15} />{saving ? 'Saving…' : 'Save settings'}</button></div></form></section>
 }
+
+/**
+ * The page heading's primary action, which is per view rather than global.
+ *
+ * Renders nothing where there is nothing to do. An empty `.heading-actions`
+ * leaves the refresh button alone on the right, which is the honest layout: the
+ * heading offers what this page can actually do.
+ */
+export function PageHeadingAction({ view, canProvision, onAddDevice }: {
+  view: View
+  /** Provisioning needs the API reachable; disabled rather than hidden, so the
+   *  action is still discoverable and its unavailability is explained by the
+   *  connection notice above it. */
+  canProvision: boolean
+  onAddDevice: () => void
+}) {
+  if (!viewOffersDeviceRegistration(view)) return null
+  return (
+    <button className="button button-primary" onClick={onAddDevice} disabled={!canProvision}>
+      <Plus size={16} />Add device
+    </button>
+  )
+}
+

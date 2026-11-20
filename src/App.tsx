@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Braces, Check, ChevronDown,
-  Menu, Plus, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
+  Menu, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
 } from 'lucide-react'
 import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
-import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, SettingsForm } from './features/network/components'
+import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, PageHeadingAction, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
 import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from './features/network/Gateways'
 import { DeviceModels } from './features/network/DeviceModels'
@@ -242,7 +242,7 @@ function App() {
         <div className="page-content">
           <div className="page-heading">
             <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : view === 'Models' ? 'Sensor types, and how their payloads are turned into readings.' : `${view} connected to your local network server.`}</p></div>
-            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refreshNetworkSnapshot()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button>{view !== 'Settings' && view !== 'Models' && <button className="button button-primary" onClick={() => setShowAdd(true)} disabled={connection !== 'connected'}><Plus size={16} />Add device</button>}</div>
+            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refreshNetworkSnapshot()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button><PageHeadingAction view={view} canProvision={connection === 'connected'} onAddDevice={() => setShowAdd(true)} /></div>
           </div>
 
           {connection !== 'connected' && connection !== 'degraded' && <div className="demo-notice"><span className="notice-dot" />{connection === 'loading' ? 'Connecting to the database API…' : 'Database API unavailable · no local sample data is shown'}</div>}
