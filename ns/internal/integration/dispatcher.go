@@ -12,6 +12,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -26,6 +28,12 @@ import (
 const (
 	KindUplink = "uplink"
 	KindJoin   = "join"
+
+	// KindIntegrationTest marks a probe published by the panel's test button.
+	// It is a distinct kind rather than a flag on a real event so a consumer can
+	// filter test traffic out entirely, and so a test can never be mistaken for
+	// a device reading.
+	KindIntegrationTest = "integration-test"
 )
 
 // Delivery defaults, applied when a Config leaves the field unset.
@@ -119,7 +127,12 @@ type Config struct {
 // Dispatcher is the Recorder the engine is built with.
 type Dispatcher struct {
 	inner engine.Recorder
-	sinks []Sink
+
+	// sinks is swapped atomically when the operator edits integrations, so a
+	// config change takes effect without restarting the process or pausing the
+	// radio path. Readers load the pointer once per delivery and iterate a slice
+	// that is never mutated in place — a swap always installs a fresh slice.
+	sinks atomic.Pointer[sinkTable]
 
 	// decoder turns an uplink's bytes into JSON. It runs in the worker, never on
 	// the radio path, so a formatter with a 100 ms deadline cannot delay a frame.
@@ -142,6 +155,42 @@ type Dispatcher struct {
 	cancel   context.CancelFunc
 	workers  sync.WaitGroup
 	closeOne sync.Once
+}
+
+// sinkTable is the immutable set of destinations. Replacing the whole table
+// rather than editing a slice is what makes a hot swap safe to read from workers
+// without a lock.
+type sinkTable struct {
+	list []Sink
+}
+
+// SetSinks replaces the delivery destinations at runtime and closes the ones
+// being dropped, so a removed MQTT sink stops reconnecting to a broker nobody
+// configured any more.
+//
+// Closing the replaced sinks happens before the new table is installed only for
+// the removed ones; sinks that survive the edit are handed over untouched and
+// keep their connections, which is why the caller passes the same *Webhook or
+// *MQTT instances where a destination did not change.
+func (d *Dispatcher) SetSinks(sinks []Sink) {
+	old := d.sinks.Swap(&sinkTable{list: sinks})
+	if old == nil {
+		return
+	}
+	keep := map[Sink]struct{}{}
+	for _, s := range sinks {
+		keep[s] = struct{}{}
+	}
+	for _, s := range old.list {
+		if _, still := keep[s]; still {
+			continue
+		}
+		if c, ok := s.(interface{ Close() error }); ok {
+			if err := c.Close(); err != nil {
+				d.log.Warn("closing a replaced integration failed", "sink", s.Name(), "err", err)
+			}
+		}
+	}
 }
 
 // job is one unit of work for a worker: the event to deliver, and the uplink
@@ -191,10 +240,10 @@ func New(inner engine.Recorder, sinks []Sink, cfg Config) *Dispatcher {
 	}
 	d := &Dispatcher{
 		inner: inner,
-		sinks: sinks,
 		queue: make(chan job, cfg.BufferSize),
 		log:   cfg.Logger,
 	}
+	d.sinks.Store(&sinkTable{list: sinks})
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	for i := 0; i < cfg.Workers; i++ {
@@ -244,10 +293,20 @@ func (d *Dispatcher) FormatterStats() *codec.RegistryStats {
 // DecodingEnabled reports whether payload formatters are being run.
 func (d *Dispatcher) DecodingEnabled() bool { return d.decoder != nil }
 
+// currentSinks reads the table once. Every caller iterates that snapshot, so a
+// concurrent SetSinks cannot change the set mid-delivery.
+func (d *Dispatcher) currentSinks() []Sink {
+	if t := d.sinks.Load(); t != nil {
+		return t.list
+	}
+	return nil
+}
+
 // Sinks reports the configured destinations, for the status endpoint.
 func (d *Dispatcher) Sinks() []string {
-	out := make([]string, 0, len(d.sinks))
-	for _, s := range d.sinks {
+	list := d.currentSinks()
+	out := make([]string, 0, len(list))
+	for _, s := range list {
 		out = append(out, s.Name())
 	}
 	return out
@@ -352,7 +411,7 @@ func (d *Dispatcher) run(ctx context.Context, j job) {
 }
 
 func (d *Dispatcher) deliver(ctx context.Context, ev Event) {
-	for _, s := range d.sinks {
+	for _, s := range d.currentSinks() {
 		if err := s.Publish(ctx, ev); err != nil {
 			d.failed.Add(1)
 			d.log.Warn("integration delivery failed",
@@ -367,8 +426,9 @@ func (d *Dispatcher) deliver(ctx context.Context, ev Event) {
 // the honest response is a counter and a log line rather than a slower radio.
 func (d *Dispatcher) enqueue(j job) {
 	// With neither a sink to deliver to nor a formatter to run, the queue would
-	// only add a copy and a goroutine hand-off between two no-ops.
-	if len(d.sinks) == 0 && d.decoder == nil {
+	// only add a copy and a goroutine hand-off between two no-ops. Read live:
+	// integrations can be added at runtime, so this must not be decided once.
+	if len(d.currentSinks()) == 0 && d.decoder == nil {
 		return
 	}
 	select {
@@ -445,6 +505,20 @@ func (d *Dispatcher) RecordEvent(ctx context.Context, ev engine.Event) error {
 // encodeBase64 renders a payload for JSON. nil stays empty rather than becoming
 // the string "null" or an empty array marker, so a consumer can treat "no data"
 // and "no field" the same way.
+// marshalEvent renders the JSON body every sink sends.
+//
+// One function rather than a json.Marshal at each sink because the body is the
+// public contract: a consumer subscribing to MQTT and a consumer receiving a
+// webhook should be able to parse the same object. Letting two sinks each
+// marshal Event independently is how they quietly diverge.
+func marshalEvent(ev Event) ([]byte, error) {
+	body, err := json.Marshal(ev)
+	if err != nil {
+		return nil, fmt.Errorf("integration: encode event: %w", err)
+	}
+	return body, nil
+}
+
 func encodeBase64(b []byte) string {
 	if len(b) == 0 {
 		return ""

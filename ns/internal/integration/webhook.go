@@ -3,7 +3,6 @@ package integration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,7 +121,7 @@ func (w *Webhook) URL() string { return w.url }
 // this event, and hammering it three times per uplink turns a configuration
 // mistake into a load problem on somebody else's service.
 func (w *Webhook) Publish(ctx context.Context, ev Event) error {
-	body, err := json.Marshal(ev)
+	body, err := marshalEvent(ev)
 	if err != nil {
 		// Not transient: an event this process cannot encode will never encode.
 		return fmt.Errorf("integration: encode %s event: %w", ev.Kind, err)
