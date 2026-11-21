@@ -16,29 +16,29 @@ import (
 // rather than with this file's expectations.
 func stationView(t *testing.T, wire []byte) uplink {
 	t.Helper()
-	p, err := lorawan.ParsePHYPayload(wire)
+	frame, err := lorawan.ParsePHYPayload(wire)
 	if err != nil {
 		t.Fatalf("ParsePHYPayload: %v", err)
 	}
-	msg := uplink{MHdr: uint(p.MHDR.Byte()), MIC: int64(uint32(wire[len(wire)-4])) |
+	msg := uplink{MHdr: uint(frame.MHDR.Byte()), MIC: int64(uint32(wire[len(wire)-4])) |
 		int64(uint32(wire[len(wire)-3]))<<8 |
 		int64(uint32(wire[len(wire)-2]))<<16 |
 		int64(uint32(wire[len(wire)-1]))<<24}
 
 	switch {
-	case p.JoinRequest != nil:
-		msg.JoinEUI = eui(p.JoinRequest.JoinEUI)
-		msg.DevEUI = eui(p.JoinRequest.DevEUI)
-		msg.DevNonce = uint32(p.JoinRequest.DevNonce)
-	case p.MAC != nil:
-		msg.DevAddr = uint32(p.MAC.FHDR.DevAddr)
-		msg.FCtrl = uint(p.MAC.FHDR.FCtrl.Byte())
-		msg.FCnt = uint(p.MAC.FHDR.FCnt)
-		msg.FOpts = hex.EncodeToString(p.MAC.FHDR.FOpts)
-		if p.MAC.FPort != nil {
-			msg.FPort = int(*p.MAC.FPort)
+	case frame.JoinRequest != nil:
+		msg.JoinEUI = eui(frame.JoinRequest.JoinEUI)
+		msg.DevEUI = eui(frame.JoinRequest.DevEUI)
+		msg.DevNonce = uint32(frame.JoinRequest.DevNonce)
+	case frame.MAC != nil:
+		msg.DevAddr = uint32(frame.MAC.FHDR.DevAddr)
+		msg.FCtrl = uint(frame.MAC.FHDR.FCtrl.Byte())
+		msg.FCnt = uint(frame.MAC.FHDR.FCnt)
+		msg.FOpts = hex.EncodeToString(frame.MAC.FHDR.FOpts)
+		if frame.MAC.FPort != nil {
+			msg.FPort = int(*frame.MAC.FPort)
 		}
-		msg.FRMPayload = hex.EncodeToString(p.MAC.FRMPayload)
+		msg.FRMPayload = hex.EncodeToString(frame.MAC.FRMPayload)
 	default:
 		t.Fatalf("unexpected frame type in %x", wire)
 	}

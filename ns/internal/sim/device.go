@@ -136,30 +136,30 @@ type UplinkOptions struct {
 }
 
 // NextUplink builds a data uplink frame.
-func (d *Device) NextUplink(o UplinkOptions) ([]byte, error) {
+func (d *Device) NextUplink(opts UplinkOptions) ([]byte, error) {
 	if !d.Joined {
 		return nil, fmt.Errorf("sim: device has no session; join first")
 	}
 
 	fcnt := d.FCntUp
-	if o.ForceFCnt != nil {
-		fcnt = *o.ForceFCnt
+	if opts.ForceFCnt != nil {
+		fcnt = *opts.ForceFCnt
 	} else {
 		d.FCntUp++
 	}
 
-	payload := append([]byte(nil), o.Payload...)
+	payload := append([]byte(nil), opts.Payload...)
 
 	// MAC commands travel either in FOpts or, for FPort 0, encrypted inside
 	// the FRMPayload. The choice is explicit rather than silent: dropping
 	// commands on the floor would hide bugs in both the device and the tests.
 	var fopts []byte
-	if len(o.MACCommands) > 0 {
-		b, err := o.MACCommands.MarshalBinary()
+	if len(opts.MACCommands) > 0 {
+		b, err := opts.MACCommands.MarshalBinary()
 		if err != nil {
 			return nil, fmt.Errorf("sim: MAC commands: %w", err)
 		}
-		if o.FPort == 0 && !o.NoFPort {
+		if opts.FPort == 0 && !opts.NoFPort {
 			if len(payload) > 0 {
 				return nil, fmt.Errorf("sim: FPort 0 carries MAC commands, not an application payload")
 			}
@@ -171,12 +171,12 @@ func (d *Device) NextUplink(o UplinkOptions) ([]byte, error) {
 			fopts = b
 		}
 	}
-	if o.NoFPort && len(payload) > 0 {
+	if opts.NoFPort && len(payload) > 0 {
 		return nil, fmt.Errorf("sim: a frame without FPort cannot carry an application payload")
 	}
 
 	mtype := lorawan.MTypeUnconfirmedDataUp
-	if o.Confirmed {
+	if opts.Confirmed {
 		mtype = lorawan.MTypeConfirmedDataUp
 	}
 
@@ -185,15 +185,15 @@ func (d *Device) NextUplink(o UplinkOptions) ([]byte, error) {
 		MAC: &lorawan.MACPayload{
 			FHDR: lorawan.FHDR{
 				DevAddr: d.DevAddr,
-				FCtrl:   lorawan.FCtrl{ADR: o.ADR, ACK: o.ACK, FOptsLen: byte(len(fopts))},
+				FCtrl:   lorawan.FCtrl{ADR: opts.ADR, ACK: opts.ACK, FOptsLen: byte(len(fopts))},
 				FCnt:    uint16(fcnt),
 				FOpts:   fopts,
 			},
 		},
 	}
 
-	if !o.NoFPort {
-		port := o.FPort
+	if !opts.NoFPort {
+		port := opts.FPort
 		phy.MAC.FPort = &port
 		phy.MAC.FRMPayload = payload
 

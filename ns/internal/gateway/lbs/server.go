@@ -187,7 +187,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.TxConfirmWindow = 15 * time.Second
 	}
 
-	s := &Server{
+	srv := &Server{
 		cfg:      cfg,
 		log:      cfg.Logger,
 		now:      cfg.Clock,
@@ -216,18 +216,18 @@ func New(cfg Config) (*Server, error) {
 		if !json.Valid(raw) {
 			return nil, fmt.Errorf("lbs: radio plan %s is not valid JSON", cfg.RadioPlanPath)
 		}
-		s.radioPlan = json.RawMessage(raw)
+		srv.radioPlan = json.RawMessage(raw)
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /discovery/v2/uri", s.handleDiscovery)
-	mux.HandleFunc("/connectedtcp/", s.handleTraffic)
-	mux.HandleFunc("/ws/", s.handleTraffic)
-	s.server = &http.Server{
+	mux.HandleFunc("POST /discovery/v2/uri", srv.handleDiscovery)
+	mux.HandleFunc("/connectedtcp/", srv.handleTraffic)
+	mux.HandleFunc("/ws/", srv.handleTraffic)
+	srv.server = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 15 * time.Second,
 	}
-	return s, nil
+	return srv, nil
 }
 
 // Start binds the TCP port and begins serving.

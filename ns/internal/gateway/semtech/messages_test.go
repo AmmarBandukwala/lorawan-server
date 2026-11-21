@@ -20,14 +20,14 @@ const classicPushData = `{"rxpk":[{` +
 	`"rxnb":12,"rxok":11,"rxfw":0,"mailf":1.2,"txnb":3}}`
 
 func TestParseUplinkBatchClassicDialect(t *testing.T) {
-	b, err := ParseUplinkBatch([]byte(classicPushData))
+	batch, err := ParseUplinkBatch([]byte(classicPushData))
 	if err != nil {
 		t.Fatalf("ParseUplinkBatch: %v", err)
 	}
-	if len(b.Uplinks) != 1 || b.Stats == nil {
-		t.Fatalf("batch = %+v", b)
+	if len(batch.Uplinks) != 1 || batch.Stats == nil {
+		t.Fatalf("batch = %+v", batch)
 	}
-	rx := b.Uplinks[0]
+	rx := batch.Uplinks[0]
 
 	// 868.1 MHz must become exactly 868100000 Hz, not 868099999.
 	if got := rx.FrequencyHz(); got != 868100000 {
@@ -66,8 +66,8 @@ func TestParseUplinkBatchClassicDialect(t *testing.T) {
 	if dr != 5 {
 		t.Errorf("SF7BW125 on EU868 = DR%d, want DR5", dr)
 	}
-	if b.Stats.RxReceived != 12 || b.Stats.RxOK != 11 || b.Stats.Altitude != 34 {
-		t.Errorf("stats = %+v", b.Stats)
+	if batch.Stats.RxReceived != 12 || batch.Stats.RxOK != 11 || batch.Stats.Altitude != 34 {
+		t.Errorf("stats = %+v", batch.Stats)
 	}
 }
 

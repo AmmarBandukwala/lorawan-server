@@ -76,45 +76,45 @@ type TrafficReader interface {
 const maxDownlinkBytes = 51
 
 func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceRepo, log *slog.Logger) *apiServer {
-	s := &apiServer{eng: eng, devices: devices, log: log, token: []byte(token)}
+	server := &apiServer{eng: eng, devices: devices, log: log, token: []byte(token)}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/downlink", s.requireAuth(s.handleEnqueueDownlink))
-	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}/downlink", s.requireAuth(s.handleCancelDownlink))
-	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/devstatus", s.requireAuth(s.handleDeviceStatus))
-	mux.HandleFunc("GET /api/v1/devices/{dev_eui}/session", s.requireAuth(s.handleSession))
+	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/downlink", server.requireAuth(server.handleEnqueueDownlink))
+	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}/downlink", server.requireAuth(server.handleCancelDownlink))
+	mux.HandleFunc("POST /api/v1/devices/{dev_eui}/devstatus", server.requireAuth(server.handleDeviceStatus))
+	mux.HandleFunc("GET /api/v1/devices/{dev_eui}/session", server.requireAuth(server.handleSession))
 
 	// Provisioning. These sit behind the same token as the downlink endpoints:
 	// being able to install keys is strictly more dangerous than being able to
 	// send a frame with keys that are already installed.
-	mux.HandleFunc("GET /api/v1/devices", s.requireAuth(s.handleListDevices))
-	mux.HandleFunc("POST /api/v1/devices", s.requireAuth(s.handleCreateDevice))
-	mux.HandleFunc("GET /api/v1/devices/{dev_eui}", s.requireAuth(s.handleGetDevice))
-	mux.HandleFunc("PUT /api/v1/devices/{dev_eui}", s.requireAuth(s.handleUpdateDevice))
-	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", s.requireAuth(s.handlePatchDevice))
-	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", s.requireAuth(s.handleDeleteDevice))
+	mux.HandleFunc("GET /api/v1/devices", server.requireAuth(server.handleListDevices))
+	mux.HandleFunc("POST /api/v1/devices", server.requireAuth(server.handleCreateDevice))
+	mux.HandleFunc("GET /api/v1/devices/{dev_eui}", server.requireAuth(server.handleGetDevice))
+	mux.HandleFunc("PUT /api/v1/devices/{dev_eui}", server.requireAuth(server.handleUpdateDevice))
+	mux.HandleFunc("PATCH /api/v1/devices/{dev_eui}", server.requireAuth(server.handlePatchDevice))
+	mux.HandleFunc("DELETE /api/v1/devices/{dev_eui}", server.requireAuth(server.handleDeleteDevice))
 
 	// Device models and decoded traffic. A model carries vendor-supplied
 	// JavaScript, so these sit behind the same token as provisioning: being able
 	// to install a formatter is being able to run code on this server.
-	mux.HandleFunc("GET /api/v1/models", s.requireAuth(s.handleListModels))
-	mux.HandleFunc("GET /api/v1/models/{model_id}", s.requireAuth(s.handleGetModel))
-	mux.HandleFunc("POST /api/v1/models/{model_id}", s.requireAuth(s.handleCreateModel))
-	mux.HandleFunc("PUT /api/v1/models/{model_id}", s.requireAuth(s.handleUpdateModel))
-	mux.HandleFunc("DELETE /api/v1/models/{model_id}", s.requireAuth(s.handleDeleteModel))
-	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", s.requireAuth(s.handleTestModelDecode))
-	mux.HandleFunc("GET /api/v1/uplinks", s.requireAuth(s.handleListUplinks))
+	mux.HandleFunc("GET /api/v1/models", server.requireAuth(server.handleListModels))
+	mux.HandleFunc("GET /api/v1/models/{model_id}", server.requireAuth(server.handleGetModel))
+	mux.HandleFunc("POST /api/v1/models/{model_id}", server.requireAuth(server.handleCreateModel))
+	mux.HandleFunc("PUT /api/v1/models/{model_id}", server.requireAuth(server.handleUpdateModel))
+	mux.HandleFunc("DELETE /api/v1/models/{model_id}", server.requireAuth(server.handleDeleteModel))
+	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", server.requireAuth(server.handleTestModelDecode))
+	mux.HandleFunc("GET /api/v1/uplinks", server.requireAuth(server.handleListUplinks))
 
 	// Integration destinations. Writes reload the live sinks before responding,
 	// so a 2xx means events will go there, not merely that a row was written.
-	mux.HandleFunc("GET /api/v1/integrations", s.requireAuth(s.handleListIntegrations))
-	mux.HandleFunc("POST /api/v1/integrations", s.requireAuth(s.handleCreateIntegration))
-	mux.HandleFunc("GET /api/v1/integrations/{id}", s.requireAuth(s.handleGetIntegration))
-	mux.HandleFunc("PUT /api/v1/integrations/{id}", s.requireAuth(s.handleUpdateIntegration))
-	mux.HandleFunc("DELETE /api/v1/integrations/{id}", s.requireAuth(s.handleDeleteIntegration))
-	mux.HandleFunc("POST /api/v1/integrations/{id}/test", s.requireAuth(s.handleTestIntegration))
+	mux.HandleFunc("GET /api/v1/integrations", server.requireAuth(server.handleListIntegrations))
+	mux.HandleFunc("POST /api/v1/integrations", server.requireAuth(server.handleCreateIntegration))
+	mux.HandleFunc("GET /api/v1/integrations/{id}", server.requireAuth(server.handleGetIntegration))
+	mux.HandleFunc("PUT /api/v1/integrations/{id}", server.requireAuth(server.handleUpdateIntegration))
+	mux.HandleFunc("DELETE /api/v1/integrations/{id}", server.requireAuth(server.handleDeleteIntegration))
+	mux.HandleFunc("POST /api/v1/integrations/{id}/test", server.requireAuth(server.handleTestIntegration))
 
-	s.http = &http.Server{
+	server.http = &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -122,7 +122,7 @@ func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceR
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	return s
+	return server
 }
 
 // Start binds the port and serves in the background. Binding synchronously means

@@ -259,45 +259,45 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	presence := s.routers.Presence()
 	views := make([]gatewayView, 0, len(presence))
 	online := 0
-	for _, g := range presence {
+	for _, gwPresence := range presence {
 		// A transport that reports Connected has already applied its own
 		// threshold; the timeout is the fallback for transports that only track
 		// a last-heard timestamp.
-		isOnline := g.Connected
-		if timeout, ok := timeouts[g.Transport]; ok && timeout > 0 {
-			isOnline = !g.LastSeen.IsZero() && now.Sub(g.LastSeen) <= timeout
+		isOnline := gwPresence.Connected
+		if timeout, ok := timeouts[gwPresence.Transport]; ok && timeout > 0 {
+			isOnline = !gwPresence.LastSeen.IsZero() && now.Sub(gwPresence.LastSeen) <= timeout
 		}
 		if isOnline {
 			online++
 		}
 
 		var statsAt *time.Time
-		if !g.StatsAt.IsZero() {
-			at := g.StatsAt
+		if !gwPresence.StatsAt.IsZero() {
+			at := gwPresence.StatsAt
 			statsAt = &at
 		}
 		views = append(views, gatewayView{
-			EUI:                 g.EUI.String(),
-			Transport:           g.Transport,
-			Protocol:            g.Protocol,
-			Address:             g.Address,
-			Firmware:            g.Firmware,
-			Model:               g.Model,
+			EUI:                 gwPresence.EUI.String(),
+			Transport:           gwPresence.Transport,
+			Protocol:            gwPresence.Protocol,
+			Address:             gwPresence.Address,
+			Firmware:            gwPresence.Firmware,
+			Model:               gwPresence.Model,
 			Online:              isOnline,
-			LastSeen:            g.LastSeen,
-			Packets:             g.Packets,
-			DownlinksSent:       g.DownlinksSent,
-			DownlinkErrors:      g.DownlinkErrors,
-			DownlinkConfirmed:   g.DownlinkConfirm,
-			DownlinkUnconfirmed: g.DownlinkUnconfirmed,
-			LastTxAckError:      g.LastTxError,
+			LastSeen:            gwPresence.LastSeen,
+			Packets:             gwPresence.Packets,
+			DownlinksSent:       gwPresence.DownlinksSent,
+			DownlinkErrors:      gwPresence.DownlinkErrors,
+			DownlinkConfirmed:   gwPresence.DownlinkConfirm,
+			DownlinkUnconfirmed: gwPresence.DownlinkUnconfirmed,
+			LastTxAckError:      gwPresence.LastTxError,
 			StatsAt:             statsAt,
-			RxReceived:          g.RxReceived,
-			RxOk:                g.RxOk,
-			TxReceived:          g.TxReceived,
-			Latitude:            g.Latitude,
-			Longitude:           g.Longitude,
-			Altitude:            g.Altitude,
+			RxReceived:          gwPresence.RxReceived,
+			RxOk:                gwPresence.RxOk,
+			TxReceived:          gwPresence.TxReceived,
+			Latitude:            gwPresence.Latitude,
+			Longitude:           gwPresence.Longitude,
+			Altitude:            gwPresence.Altitude,
 		})
 	}
 

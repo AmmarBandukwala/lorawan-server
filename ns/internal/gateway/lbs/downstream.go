@@ -52,36 +52,36 @@ const downlinkPriority = 25
 // the route, and it exists only while the station holds it. A station that has
 // dropped off cannot be reached at all, which is stated rather than papered over
 // because "the gateway is offline" is the answer an operator needs.
-func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error {
+func (s *Server) SendDownlink(_ context.Context, frame gateway.DownlinkFrame) error {
 	if s.closed.Load() {
 		return errors.New("lbs: the server is shutting down")
 	}
-	id := euiFromLorawan(f.GatewayID)
+	id := euiFromLorawan(frame.GatewayID)
 	sess, ok := s.lookup(id)
 	if !ok {
 		return fmt.Errorf("lbs: station %s is not connected; "+
 			"it must hold a WebSocket connection to receive downlinks", id)
 	}
 
-	ref, err := s.transmitReference(sess, f)
+	ref, err := s.transmitReference(sess, frame)
 	if err != nil {
 		return fmt.Errorf("lbs: cannot schedule a downlink to %s: %w", id, err)
 	}
-	delaySeconds := wholeSecondDelay(f.Delay)
+	delaySeconds := wholeSecondDelay(frame.Delay)
 
 	dn := downlink{
 		Type:     msgDownlink,
-		DevEUI:   f.DeviceEUI.String(),
+		DevEUI:   frame.DeviceEUI.String(),
 		Class:    deviceClassA,
 		DIID:     sess.diid.Add(1),
-		PDU:      hex.EncodeToString(f.PHYPayload),
+		PDU:      hex.EncodeToString(frame.PHYPayload),
 		Priority: downlinkPriority,
 		RCtx:     sess.rctx.Load(),
 		MuxTime:  float64(s.now().UnixNano()) / 1e9,
 
 		RxDelay: delaySeconds,
-		Rx1DR:   f.DataRateIndex,
-		Rx1Freq: uint64(f.FrequencyHz),
+		Rx1DR:   frame.DataRateIndex,
+		Rx1Freq: uint64(frame.FrequencyHz),
 		XTime:   uint64(ref),
 	}
 	// The field names say RX1 but they mean "this transmission's data rate and
@@ -89,7 +89,7 @@ func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error 
 	// What does change is the device class: a manual-window frame is a class-C or
 	// late re-transmission, and the station treats those differently when it
 	// decides whether to hold or drop the frame.
-	if f.Window == gateway.RxWindowManual {
+	if frame.Window == gateway.RxWindowManual {
 		dn.Class = deviceClassC
 	}
 
@@ -101,12 +101,12 @@ func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error 
 		sess.noteDownlinkFailure("the station is not reading the connection")
 		return fmt.Errorf("lbs: send dnmsg to %s: %w", id, err)
 	}
-	sess.noteDownlinkSent(dn.DIID, f.DeviceEUI.String(), f.Window.String(), s.now())
+	sess.noteDownlinkSent(dn.DIID, frame.DeviceEUI.String(), frame.Window.String(), s.now())
 
 	s.log.Info("downlink dispatched",
-		"gateway", id, "device", f.DeviceEUI, "window", f.Window.String(),
-		"freq_hz", f.FrequencyHz, "dr", f.DataRateIndex, "delay_s", delaySeconds,
-		"ref", ref.String(), "diid", dn.DIID, "bytes", len(f.PHYPayload))
+		"gateway", id, "device", frame.DeviceEUI, "window", frame.Window.String(),
+		"freq_hz", frame.FrequencyHz, "dr", frame.DataRateIndex, "delay_s", delaySeconds,
+		"ref", ref.String(), "diid", dn.DIID, "bytes", len(frame.PHYPayload))
 	return nil
 }
 

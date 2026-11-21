@@ -43,28 +43,28 @@ type options struct {
 }
 
 func main() {
-	var o options
-	flag.StringVar(&o.addr, "addr", "127.0.0.1:6858", "UDP address of the ns server")
-	flag.StringVar(&o.region, "region", region.DefaultRegion,
+	var opts options
+	flag.StringVar(&opts.addr, "addr", "127.0.0.1:6858", "UDP address of the ns server")
+	flag.StringVar(&opts.region, "region", region.DefaultRegion,
 		"regional band the simulated gateway uses; one of "+joinRegions())
-	flag.StringVar(&o.gatewayEUI, "gateway-eui", "AA55555555555555", "gateway EUI to announce")
-	flag.StringVar(&o.devEUI, "dev-eui", "0011223344556677", "device EUI")
-	flag.StringVar(&o.joinEUI, "join-eui", "0102030405060708", "join (App) EUI")
-	flag.StringVar(&o.appKey, "app-key", "2b7e151628aed2a6abf7158809cf4f3c", "OTAA AppKey")
-	flag.StringVar(&o.netID, "net-id", "000000", "NetID the server is configured with")
+	flag.StringVar(&opts.gatewayEUI, "gateway-eui", "AA55555555555555", "gateway EUI to announce")
+	flag.StringVar(&opts.devEUI, "dev-eui", "0011223344556677", "device EUI")
+	flag.StringVar(&opts.joinEUI, "join-eui", "0102030405060708", "join (App) EUI")
+	flag.StringVar(&opts.appKey, "app-key", "2b7e151628aed2a6abf7158809cf4f3c", "OTAA AppKey")
+	flag.StringVar(&opts.netID, "net-id", "000000", "NetID the server is configured with")
 	// Left unset, the uplink goes out on the band's first enabled channel at the
 	// slowest data rate it allows — the settings a cold device actually uses.
 	// Deriving them from the band table is what makes `-region AS923-3` work
 	// without also having to know that band's channels by heart.
-	flag.Float64Var(&o.uplinkFreq, "freq", 0,
+	flag.Float64Var(&opts.uplinkFreq, "freq", 0,
 		"uplink channel in MHz (default: the band's first uplink channel)")
-	flag.StringVar(&o.dataRate, "datr", "",
+	flag.StringVar(&opts.dataRate, "datr", "",
 		"uplink data rate as a Semtech datr string (default: the band's minimum data rate)")
-	flag.StringVar(&o.payload, "payload", "48656c6c6f204669656c646e6f6465", "application payload, hex")
-	flag.DurationVar(&o.timeout, "timeout", 12*time.Second, "how long to wait for each downlink window")
+	flag.StringVar(&opts.payload, "payload", "48656c6c6f204669656c646e6f6465", "application payload, hex")
+	flag.DurationVar(&opts.timeout, "timeout", 12*time.Second, "how long to wait for each downlink window")
 	flag.Parse()
 
-	if err := run(o); err != nil {
+	if err := run(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "\nnsbench: %v\n", err)
 		os.Exit(1)
 	}
@@ -96,59 +96,59 @@ func joinRegions() string {
 	return strings.Join(region.Names(), ", ")
 }
 
-func run(o options) error {
+func run(opts options) error {
 	// Validating the band up front means a typo is reported as a bad flag rather
 	// than as a mysterious rejection later.
-	reg, err := region.New(o.region)
+	reg, err := region.New(opts.region)
 	if err != nil {
 		return err
 	}
 	// Fill in the radio settings the band implies, so pointing the tool at
 	// another band needs one flag instead of three that have to agree.
-	if err := o.resolveUplink(reg); err != nil {
+	if err := opts.resolveUplink(reg); err != nil {
 		return err
 	}
-	fmt.Printf("region %s: uplink %.3f MHz at %s\n", reg.CommonName(), o.uplinkFreq, o.dataRate)
+	fmt.Printf("region %s: uplink %.3f MHz at %s\n", reg.CommonName(), opts.uplinkFreq, opts.dataRate)
 
-	gwEUI, err := lorawan.ParseEUI64(o.gatewayEUI)
+	gwEUI, err := lorawan.ParseEUI64(opts.gatewayEUI)
 	if err != nil {
 		return fmt.Errorf("-gateway-eui: %w", err)
 	}
-	devEUI, err := lorawan.ParseEUI64(o.devEUI)
+	devEUI, err := lorawan.ParseEUI64(opts.devEUI)
 	if err != nil {
 		return fmt.Errorf("-dev-eui: %w", err)
 	}
-	joinEUI, err := lorawan.ParseEUI64(o.joinEUI)
+	joinEUI, err := lorawan.ParseEUI64(opts.joinEUI)
 	if err != nil {
 		return fmt.Errorf("-join-eui: %w", err)
 	}
-	appKey, err := lorawan.ParseAES128Key(o.appKey)
+	appKey, err := lorawan.ParseAES128Key(opts.appKey)
 	if err != nil {
 		return fmt.Errorf("-app-key: %w", err)
 	}
-	netID, err := lorawan.ParseNetID(o.netID)
+	netID, err := lorawan.ParseNetID(opts.netID)
 	if err != nil {
 		return fmt.Errorf("-net-id: %w", err)
 	}
-	payload, err := hex.DecodeString(o.payload)
+	payload, err := hex.DecodeString(opts.payload)
 	if err != nil {
 		return fmt.Errorf("-payload is not hex: %w", err)
 	}
 
-	conn, err := net.Dial("udp", o.addr)
+	conn, err := net.Dial("udp", opts.addr)
 	if err != nil {
-		return fmt.Errorf("dial %s: %w", o.addr, err)
+		return fmt.Errorf("dial %s: %w", opts.addr, err)
 	}
 	defer conn.Close()
 
-	g := &forwarder{conn: conn, eui: gwEUI}
-	fmt.Printf("nsbench: simulating gateway %s on %s against %s\n", gwEUI, o.region, o.addr)
+	station := &forwarder{conn: conn, eui: gwEUI}
+	fmt.Printf("nsbench: simulating gateway %s on %s against %s\n", gwEUI, opts.region, opts.addr)
 
 	// A forwarder announces itself before it can be reached.
-	if err := g.pullData(conn); err != nil {
+	if err := station.pullData(conn); err != nil {
 		return err
 	}
-	if err := g.stats(conn); err != nil {
+	if err := station.stats(conn); err != nil {
 		return err
 	}
 
@@ -161,12 +161,12 @@ func run(o options) error {
 		devEUI, dev.DevNonce, len(joinReq))
 
 	tmst := uint32(time.Now().UnixMicro())
-	if err := g.pushData(conn, joinReq, o.uplinkFreq, o.dataRate, tmst); err != nil {
+	if err := station.pushData(conn, joinReq, opts.uplinkFreq, opts.dataRate, tmst); err != nil {
 		return err
 	}
 
-	fmt.Printf("2. waiting for the join-accept in both RX windows (up to %v)\n", o.timeout)
-	copies, err := g.awaitDownlinks(conn, o.timeout, func(wire []byte) error {
+	fmt.Printf("2. waiting for the join-accept in both RX windows (up to %v)\n", opts.timeout)
+	copies, err := station.awaitDownlinks(conn, opts.timeout, func(wire []byte) error {
 		return dev.HandleJoinAccept(wire)
 	})
 	if err != nil {
@@ -177,7 +177,7 @@ func run(o options) error {
 
 	// The server answers a join in both windows, so the RX2 copy is still in
 	// flight; clear it before reading the next exchange.
-	g.drain(conn, 3*time.Second)
+	station.drain(conn, 3*time.Second)
 
 	// A confirmed uplink is chosen deliberately: the server must acknowledge it,
 	// which makes the next downlink something to assert rather than hope for. An
@@ -188,13 +188,13 @@ func run(o options) error {
 	}
 	fmt.Printf("\n4. over the air: confirmed uplink fCnt=%d fPort=1 %d byte payload, "+
 		"%d bytes on air\n", dev.FCntUp-1, len(payload), len(up))
-	if err := g.pushData(conn, up, o.uplinkFreq, o.dataRate, tmst+1_000_000); err != nil {
+	if err := station.pushData(conn, up, opts.uplinkFreq, opts.dataRate, tmst+1_000_000); err != nil {
 		return err
 	}
 
-	fmt.Printf("5. waiting for the acknowledgement (up to %v)\n", o.timeout)
+	fmt.Printf("5. waiting for the acknowledgement (up to %v)\n", opts.timeout)
 	gotDownlink := false
-	_, err = g.awaitDownlinks(conn, o.timeout, func(wire []byte) error {
+	_, err = station.awaitDownlinks(conn, opts.timeout, func(wire []byte) error {
 		dl, err := dev.HandleDownlink(wire)
 		if err != nil {
 			return err

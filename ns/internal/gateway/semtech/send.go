@@ -29,49 +29,49 @@ import (
 //
 // The context is deliberately unused: a UDP write is not cancellable, and the
 // engine hands down a context that outlives the request that scheduled it.
-func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error {
+func (s *Server) SendDownlink(_ context.Context, frame gateway.DownlinkFrame) error {
 	if s.conn == nil {
 		return errors.New("semtech: server is not started")
 	}
-	rec, ok := s.reg.lookup(f.GatewayID)
+	rec, ok := s.reg.lookup(frame.GatewayID)
 	if !ok {
 		return fmt.Errorf("semtech: gateway %s has never been heard from; "+
-			"it must send PULL_DATA before it can receive downlinks", f.GatewayID)
+			"it must send PULL_DATA before it can receive downlinks", frame.GatewayID)
 	}
 	addr, err := net.ResolveUDPAddr("udp", rec.Addr)
 	if err != nil {
-		return fmt.Errorf("semtech: gateway %s address %q: %w", f.GatewayID, rec.Addr, err)
+		return fmt.Errorf("semtech: gateway %s address %q: %w", frame.GatewayID, rec.Addr, err)
 	}
-	if _, wantHash, _, _ := parseToken(f.UplinkID); wantHash != 0 && wantHash != addrHash(addr) {
+	if _, wantHash, _, _ := parseToken(frame.UplinkID); wantHash != 0 && wantHash != addrHash(addr) {
 		s.log.Warn("gateway address changed between uplink and downlink; using the newest one",
-			"gateway", f.GatewayID, "uplink_addr_hash", wantHash, "current_addr", rec.Addr)
+			"gateway", frame.GatewayID, "uplink_addr_hash", wantHash, "current_addr", rec.Addr)
 	}
 
-	reg, err := s.regionFor(f.RFRegion)
+	reg, err := s.regionFor(frame.RFRegion)
 	if err != nil {
-		return fmt.Errorf("semtech: region for the downlink to %s: %w", f.GatewayID, err)
+		return fmt.Errorf("semtech: region for the downlink to %s: %w", frame.GatewayID, err)
 	}
-	modu, datr, codr, err := DataRateStrings(reg, f.DataRateIndex)
+	modu, datr, codr, err := DataRateStrings(reg, frame.DataRateIndex)
 	if err != nil {
-		return fmt.Errorf("semtech: downlink data rate for %s: %w", f.GatewayID, err)
+		return fmt.Errorf("semtech: downlink data rate for %s: %w", frame.GatewayID, err)
 	}
 
 	tx := DownlinkCommand{
-		FrequencyMHZ:       region.HertzToMHz(f.FrequencyHz),
-		PowerdBm:           f.TxPowerdBm,
+		FrequencyMHZ:       region.HertzToMHz(frame.FrequencyHz),
+		PowerdBm:           frame.TxPowerdBm,
 		Modulation:         modu,
 		DataRate:           datr,
 		CodingRate:         codr,
 		InvertPolarization: true, // LoRaWAN always inverts downlink polarity
-		Size:               len(f.PHYPayload),
-		Data:               strings.ToUpper(hex.EncodeToString(f.PHYPayload)),
+		Size:               len(frame.PHYPayload),
+		Data:               strings.ToUpper(hex.EncodeToString(frame.PHYPayload)),
 	}
-	if tmst, okTS := downlinkTimestamp(f.UplinkID, f.Delay); okTS {
+	if tmst, okTS := downlinkTimestamp(frame.UplinkID, frame.Delay); okTS {
 		tx.TimestampUS = &tmst
 	} else {
 		tx.Immediate = true
 		s.log.Warn("uplink carried no concentrator timestamp; transmitting immediately",
-			"gateway", f.GatewayID, "window", f.Window.String(), "delay", f.Delay)
+			"gateway", frame.GatewayID, "window", frame.Window.String(), "delay", frame.Delay)
 	}
 
 	body, err := MarshalDownlink(tx)
@@ -84,12 +84,12 @@ func (s *Server) SendDownlink(_ context.Context, f gateway.DownlinkFrame) error 
 		Sequence: uint16(s.seq.Add(1)),
 	}
 	if _, err := s.conn.WriteToUDP(BuildPacket(hdr, body), addr); err != nil {
-		return fmt.Errorf("semtech: send PULL_RESP to %s: %w", f.GatewayID, err)
+		return fmt.Errorf("semtech: send PULL_RESP to %s: %w", frame.GatewayID, err)
 	}
-	s.reg.noteDownlinkSent(f.GatewayID)
+	s.reg.noteDownlinkSent(frame.GatewayID)
 	s.log.Info("downlink dispatched",
-		"gateway", f.GatewayID, "window", f.Window.String(),
-		"freq_hz", f.FrequencyHz, "datr", datr, "power_dbm", f.TxPowerdBm,
+		"gateway", frame.GatewayID, "window", frame.Window.String(),
+		"freq_hz", frame.FrequencyHz, "datr", datr, "power_dbm", frame.TxPowerdBm,
 		"bytes", tx.Size, "timed", tx.TimestampUS != nil)
 	return nil
 }

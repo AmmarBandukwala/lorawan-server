@@ -123,42 +123,42 @@ func ParseHeader(pkt []byte) (Header, error) {
 	if len(pkt) < 3 {
 		return Header{}, fmt.Errorf("semtech: packet too short: %d bytes", len(pkt))
 	}
-	h := Header{
+	header := Header{
 		Version:  pkt[0] >> 5,
 		Type:     PacketType(pkt[0] & 0x1f),
 		Sequence: binary.BigEndian.Uint16(pkt[1:3]),
 	}
-	if h.Version < supportedFrom || h.Version > supportedUntil {
+	if header.Version < supportedFrom || header.Version > supportedUntil {
 		return Header{}, fmt.Errorf("semtech: unsupported protocol version %d (want %d or %d)",
-			h.Version, supportedFrom, supportedUntil)
+			header.Version, supportedFrom, supportedUntil)
 	}
-	if !h.Type.IsKnown() {
-		return Header{}, fmt.Errorf("semtech: unknown packet type 0x%02x", byte(h.Type))
+	if !header.Type.IsKnown() {
+		return Header{}, fmt.Errorf("semtech: unknown packet type 0x%02x", byte(header.Type))
 	}
-	if !h.Type.HasGatewayID() {
+	if !header.Type.HasGatewayID() {
 		// No identifier: the body, if any, starts right after the 3-byte
 		// header. PULL_RESP lands here — a forwarder that never got its txpk
 		// because we assumed "no identifier means no body" is a bug worth
 		// remembering.
-		h.BodyStart = 3
-		return h, nil
+		header.BodyStart = 3
+		return header, nil
 	}
 
-	idLen, _ := IdentifierLen(h.Version)
+	idLen, _ := IdentifierLen(header.Version)
 	if len(pkt) < 3+idLen {
 		return Header{}, fmt.Errorf("semtech: %s v%d needs %d bytes of identifier, datagram has %d",
-			h.Type, h.Version, idLen, len(pkt))
+			header.Type, header.Version, idLen, len(pkt))
 	}
-	if h.Version == Version1 {
-		copy(h.MAC[:], pkt[3:9])
-		h.HasMAC = true
-		h.Gateway = lorawan.EUI64{0, 0, h.MAC[0], h.MAC[1], h.MAC[2], h.MAC[3], h.MAC[4], h.MAC[5]}
-		h.BodyStart = 9
-		return h, nil
+	if header.Version == Version1 {
+		copy(header.MAC[:], pkt[3:9])
+		header.HasMAC = true
+		header.Gateway = lorawan.EUI64{0, 0, header.MAC[0], header.MAC[1], header.MAC[2], header.MAC[3], header.MAC[4], header.MAC[5]}
+		header.BodyStart = 9
+		return header, nil
 	}
-	copy(h.Gateway[:], pkt[3:11])
-	h.BodyStart = 11
-	return h, nil
+	copy(header.Gateway[:], pkt[3:11])
+	header.BodyStart = 11
+	return header, nil
 }
 
 // IsKnown reports whether the packet type is one of the six defined types.

@@ -96,39 +96,39 @@ func (s *Supervisor) Reload(ctx context.Context) error {
 	nextLive := map[string]liveSink{}
 	reports := map[string]Report{}
 
-	for _, d := range destinations {
-		report := Report{ID: d.ID, Kind: d.Kind, Name: d.Name, Enabled: d.Enabled}
+	for _, destination := range destinations {
+		report := Report{ID: destination.ID, Kind: destination.Kind, Name: destination.Name, Enabled: destination.Enabled}
 
 		// Disabled keeps its entry so the panel can still show the destination
 		// exists, but holds no connection: switching a broker off should stop the
 		// network server dialling it.
-		if !d.Enabled {
-			reports[d.ID] = report
+		if !destination.Enabled {
+			reports[destination.ID] = report
 			continue
 		}
 
-		fp := d.Fingerprint()
-		if prev, ok := s.live[d.ID]; ok && prev.fingerprint == fp {
+		fp := destination.Fingerprint()
+		if prev, ok := s.live[destination.ID]; ok && prev.fingerprint == fp {
 			next = append(next, prev.sink)
-			nextLive[d.ID] = prev
+			nextLive[destination.ID] = prev
 			report.Connected = connectedOf(prev.sink)
-			reports[d.ID] = report
+			reports[destination.ID] = report
 			continue
 		}
 
-		sink, err := d.BuildSink(s.log)
+		sink, err := destination.BuildSink(s.log)
 		if err != nil {
 			// Validation should have refused this at save time; arriving here
 			// means a row was written by hand or by an older build.
 			report.Error = err.Error()
-			reports[d.ID] = report
-			s.log.Error("cannot build a configured integration", "id", d.ID, "err", err)
+			reports[destination.ID] = report
+			s.log.Error("cannot build a configured integration", "id", destination.ID, "err", err)
 			continue
 		}
 		next = append(next, sink)
-		nextLive[d.ID] = liveSink{fingerprint: fp, sink: sink}
+		nextLive[destination.ID] = liveSink{fingerprint: fp, sink: sink}
 		report.Connected = connectedOf(sink)
-		reports[d.ID] = report
+		reports[destination.ID] = report
 	}
 
 	// Anything stored but no longer present is dropped by not appearing here,

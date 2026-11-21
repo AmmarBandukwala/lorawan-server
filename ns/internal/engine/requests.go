@@ -27,7 +27,7 @@ import (
 // this returns a set rather than trying to include everything at once.
 func (e *Engine) outstandingRequests(session *Session) (lorawan.MACCommandSet, error) {
 	var out lorawan.MACCommandSet
-	add := func(cid lorawan.CID, p []byte) { out = append(out, lorawan.MACCommand{CID: cid, Payload: p}) }
+	add := func(cid lorawan.CID, raw []byte) { out = append(out, lorawan.MACCommand{CID: cid, Payload: raw}) }
 
 	if req := session.PendingADR; req != nil && session.LinkADRRetries <= e.cfg.LinkADRMaxRetries {
 		add(lorawan.CIDLinkADR, req.payload().Marshal())
@@ -36,14 +36,14 @@ func (e *Engine) outstandingRequests(session *Session) (lorawan.MACCommandSet, e
 		// OptNeg is set to 1 in the RXParamSetupReq DLSettings: in 1.0.3 that
 		// bit is RFU and devices expect it set, and a 1.1 device reads it as
 		// the OptNeg flag.
-		p, err := lorawan.RXParamSetupReqPayload{
+		raw, err := lorawan.RXParamSetupReqPayload{
 			Frequency:  req.FrequencyHz,
 			DLSettings: lorawan.DLSettings{OptNeg: true, RX2DataRate: byte(req.DataRate)},
 		}.Marshal()
 		if err != nil {
 			return nil, fmt.Errorf("engine: encode RXParamSetupReq: %w", err)
 		}
-		add(lorawan.CIDRXParamSetup, p)
+		add(lorawan.CIDRXParamSetup, raw)
 	}
 	if req := session.PendingDutyCycle; req != nil {
 		add(lorawan.CIDDutyCycle,
@@ -61,7 +61,7 @@ func (e *Engine) outstandingRequests(session *Session) (lorawan.MACCommandSet, e
 			lorawan.RXTimingSetupReqPayload{Delay: byte(req.DelaySeconds)}.Marshal())
 	}
 	if req := session.PendingChannel; req != nil {
-		p, err := lorawan.NewChannelReqPayload{
+		raw, err := lorawan.NewChannelReqPayload{
 			ChIndex:   byte(req.Index),
 			Frequency: req.FrequencyHz,
 			MinDR:     byte(req.MinDataRate),
@@ -70,7 +70,7 @@ func (e *Engine) outstandingRequests(session *Session) (lorawan.MACCommandSet, e
 		if err != nil {
 			return nil, fmt.Errorf("engine: encode NewChannelReq: %w", err)
 		}
-		add(lorawan.CIDNewChannel, p)
+		add(lorawan.CIDNewChannel, raw)
 	}
 	return out, nil
 }

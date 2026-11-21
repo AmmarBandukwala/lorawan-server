@@ -95,10 +95,10 @@ func (s *Server) handlePushData(ctx context.Context, h Header, pkt []byte, from 
 }
 
 // handleRx converts one rxpk into an engine uplink.
-func (s *Server) handleRx(ctx context.Context, h Header, rx RadioRx, from *net.UDPAddr) {
+func (s *Server) handleRx(ctx context.Context, header Header, rx RadioRx, from *net.UDPAddr) {
 	raw, err := rx.PHYBytes()
 	if err != nil {
-		s.log.Warn("dropping rxpk", "gateway", h.Gateway, "err", err)
+		s.log.Warn("dropping rxpk", "gateway", header.Gateway, "err", err)
 		return
 	}
 	reg, err := s.regionFor("")
@@ -109,7 +109,7 @@ func (s *Server) handleRx(ctx context.Context, h Header, rx RadioRx, from *net.U
 	dr, err := rx.DataRateIndex(reg)
 	if err != nil {
 		s.log.Warn("dropping rxpk with an unknown data rate",
-			"gateway", h.Gateway, "freq_hz", rx.FrequencyHz(), "err", err)
+			"gateway", header.Gateway, "freq_hz", rx.FrequencyHz(), "err", err)
 		return
 	}
 	ts, hasTS := rx.ConcentratorTimestamp()
@@ -119,7 +119,7 @@ func (s *Server) handleRx(ctx context.Context, h Header, rx RadioRx, from *net.U
 	}
 
 	f := gateway.UplinkFrame{
-		GatewayID:     h.Gateway,
+		GatewayID:     header.Gateway,
 		RFRegion:      s.cfg.Region,
 		FrequencyHz:   rx.FrequencyHz(),
 		DataRateIndex: dr,
@@ -128,7 +128,7 @@ func (s *Server) handleRx(ctx context.Context, h Header, rx RadioRx, from *net.U
 		// first transmission. Every uplink is therefore treated as RX1 — which
 		// is safe here because the engine answers in both windows anyway.
 		RxWindow:   gateway.RxWindow1,
-		UplinkID:   makeToken(h.Sequence, from, ts, hasTS),
+		UplinkID:   makeToken(header.Sequence, from, ts, hasTS),
 		PHYPayload: raw,
 		RSSI:       rx.RSSI,
 		SNR:        rx.SNR,
@@ -136,7 +136,7 @@ func (s *Server) handleRx(ctx context.Context, h Header, rx RadioRx, from *net.U
 	}
 	if err := s.cfg.Handler.HandleUplink(ctx, f); err != nil {
 		s.log.Error("engine failed to handle an uplink",
-			"gateway", h.Gateway, "freq_hz", f.FrequencyHz, "err", err)
+			"gateway", header.Gateway, "freq_hz", f.FrequencyHz, "err", err)
 	}
 }
 

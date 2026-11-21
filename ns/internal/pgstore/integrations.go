@@ -134,14 +134,14 @@ func unmarshalDestinationConfig(kind string, raw []byte, d *integration.Destinat
 // Getting this backwards on the false branch would disarm a webhook the first
 // time somebody renamed it, and the symptom would be a downstream system quietly
 // rejecting events with 401 long after the edit that caused it.
-func (s *Store) SaveIntegration(ctx context.Context, d *integration.Destination, replaceSecret bool) error {
-	if d == nil || d.ID == "" {
+func (s *Store) SaveIntegration(ctx context.Context, destination *integration.Destination, replaceSecret bool) error {
+	if destination == nil || destination.ID == "" {
 		return errors.New("pgstore: integration has no id")
 	}
-	if err := d.Validate(); err != nil {
+	if err := destination.Validate(); err != nil {
 		return err
 	}
-	raw, err := marshalDestinationConfig(d)
+	raw, err := marshalDestinationConfig(destination)
 	if err != nil {
 		return err
 	}
@@ -157,9 +157,9 @@ func (s *Store) SaveIntegration(ctx context.Context, d *integration.Destination,
 			secret     = CASE WHEN $7 THEN EXCLUDED.secret
 			                  ELSE ns_integrations.secret END,
 			updated_at = now()`,
-		d.ID, d.Kind, d.Name, d.Enabled, raw, d.Secret, replaceSecret)
+		destination.ID, destination.Kind, destination.Name, destination.Enabled, raw, destination.Secret, replaceSecret)
 	if err != nil {
-		return fmt.Errorf("pgstore: save integration %s: %w", d.ID, err)
+		return fmt.Errorf("pgstore: save integration %s: %w", destination.ID, err)
 	}
 	return nil
 }

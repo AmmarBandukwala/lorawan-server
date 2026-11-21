@@ -330,7 +330,7 @@ func newRecorder(store engine.Store, integrationStore IntegrationStore, cfg conf
 		}
 		sinks = append(sinks, w)
 	}
-	d := integration.New(store.Recorder, sinks, integration.Config{
+	dispatcher := integration.New(store.Recorder, sinks, integration.Config{
 		Logger: log.With("component", "integration"),
 	})
 
@@ -352,7 +352,7 @@ func newRecorder(store engine.Store, integrationStore IntegrationStore, cfg conf
 				}
 				return out, nil
 			},
-			d.SetSinks,
+			dispatcher.SetSinks,
 			sinks,
 			log,
 		)
@@ -377,17 +377,17 @@ func newRecorder(store engine.Store, integrationStore IntegrationStore, cfg conf
 				Logger:  log.With("component", "codec"),
 				Options: codec.Options{Timeout: cfg.codecExecution},
 			})
-		d.EnableDecoding(decoder, persist)
+		dispatcher.EnableDecoding(decoder, persist)
 		log.Info("payload formatters enabled", "models", canDecode)
 	}
 	wrapped := store
-	wrapped.Recorder = d
-	if len(d.Sinks()) > 0 {
-		log.Info("integrations enabled", "sinks", d.Sinks())
+	wrapped.Recorder = dispatcher
+	if len(dispatcher.Sinks()) > 0 {
+		log.Info("integrations enabled", "sinks", dispatcher.Sinks())
 	}
 	// sync.OnceFunc so the deferred close and the explicit shutdown path cannot
 	// both try to drain the queue.
-	return wrapped, d, supervisor, sync.OnceFunc(func() { _ = d.Close() }), nil
+	return wrapped, dispatcher, supervisor, sync.OnceFunc(func() { _ = dispatcher.Close() }), nil
 }
 
 // modelSource adapts the engine's two repositories to the narrower port the

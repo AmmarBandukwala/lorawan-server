@@ -68,25 +68,25 @@ func TestClientRoutes(t *testing.T) {
 
 	calls := clientCalls(devEUI, model)
 
-	for _, c := range calls {
+	for _, call := range calls {
 		gotMethod, gotPath, gotQuery = "", "", ""
-		if err := c.invoke(client); err != nil {
-			t.Errorf("%s: %v", c.name, err)
+		if err := call.invoke(client); err != nil {
+			t.Errorf("%s: %v", call.name, err)
 			continue
 		}
 		// An empty expected method means the call is not supposed to reach the
 		// network at all, so there is nothing to compare.
-		if c.method == "" {
+		if call.method == "" {
 			continue
 		}
-		if gotMethod != c.method || gotPath != c.path {
-			t.Errorf("%s: %s %s\n want %s %s", c.name, gotMethod, gotPath, c.method, c.path)
+		if gotMethod != call.method || gotPath != call.path {
+			t.Errorf("%s: %s %s\n want %s %s", call.name, gotMethod, gotPath, call.method, call.path)
 		}
-		if gotQuery != c.query {
-			t.Errorf("%s: query = %q, want %q", c.name, gotQuery, c.query)
+		if gotQuery != call.query {
+			t.Errorf("%s: query = %q, want %q", call.name, gotQuery, call.query)
 		}
 		if gotAuth != "Bearer test-token" {
-			t.Errorf("%s: Authorization = %q, want the bearer token", c.name, gotAuth)
+			t.Errorf("%s: Authorization = %q, want the bearer token", call.name, gotAuth)
 		}
 	}
 }
@@ -264,79 +264,91 @@ func anyRouteMatches(patterns []routePattern, method, path string) bool {
 // same assumption.
 func clientCalls(devEUI, model string) []call {
 	return []call{
-		{"CreateDevice", func(c *Client) error { _, e := c.CreateDevice(context.Background(), Device{}); return e },
+		{"CreateDevice", func(client *Client) error { _, e := client.CreateDevice(context.Background(), Device{}); return e },
 			http.MethodPost, "/api/v1/devices", ""},
-		{"PutDevice", func(c *Client) error {
-			_, e := c.PutDevice(context.Background(), Device{DevEUI: devEUI})
+		{"PutDevice", func(client *Client) error {
+			_, e := client.PutDevice(context.Background(), Device{DevEUI: devEUI})
 			return e
 		}, http.MethodPut, "/api/v1/devices/" + devEUI, ""},
-		{"PutDevice without a DevEUI", func(c *Client) error {
-			_, e := c.PutDevice(context.Background(), Device{})
+		{"PutDevice without a DevEUI", func(client *Client) error {
+			_, e := client.PutDevice(context.Background(), Device{})
 			return errWantRejected(e)
 		}, "", "", ""},
-		{"Device", func(c *Client) error { _, e := c.Device(context.Background(), devEUI); return e },
+		{"Device", func(client *Client) error { _, e := client.Device(context.Background(), devEUI); return e },
 			http.MethodGet, "/api/v1/devices/" + devEUI, ""},
-		{"PatchDevice", func(c *Client) error { _, e := c.PatchDevice(context.Background(), devEUI, DevicePatch{}); return e },
+		{"PatchDevice", func(client *Client) error {
+			_, e := client.PatchDevice(context.Background(), devEUI, DevicePatch{})
+			return e
+		},
 			http.MethodPatch, "/api/v1/devices/" + devEUI, ""},
-		{"DeleteDevice", func(c *Client) error { _, e := c.DeleteDevice(context.Background(), devEUI); return e },
+		{"DeleteDevice", func(client *Client) error { _, e := client.DeleteDevice(context.Background(), devEUI); return e },
 			http.MethodDelete, "/api/v1/devices/" + devEUI, ""},
-		{"Session", func(c *Client) error { _, e := c.Session(context.Background(), devEUI); return e },
+		{"Session", func(client *Client) error { _, e := client.Session(context.Background(), devEUI); return e },
 			http.MethodGet, "/api/v1/devices/" + devEUI + "/session", ""},
-		{"EnqueueDownlink", func(c *Client) error {
-			_, e := c.EnqueueDownlink(context.Background(), devEUI, 10, "00", false)
+		{"EnqueueDownlink", func(client *Client) error {
+			_, e := client.EnqueueDownlink(context.Background(), devEUI, 10, "00", false)
 			return e
 		}, http.MethodPost, "/api/v1/devices/" + devEUI + "/downlink", ""},
-		{"CancelDownlink", func(c *Client) error { _, e := c.CancelDownlink(context.Background(), devEUI); return e },
+		{"CancelDownlink", func(client *Client) error { _, e := client.CancelDownlink(context.Background(), devEUI); return e },
 			http.MethodDelete, "/api/v1/devices/" + devEUI + "/downlink", ""},
-		{"RequestDeviceStatus", func(c *Client) error {
-			_, e := c.RequestDeviceStatus(context.Background(), devEUI)
+		{"RequestDeviceStatus", func(client *Client) error {
+			_, e := client.RequestDeviceStatus(context.Background(), devEUI)
 			return e
 		}, http.MethodPost, "/api/v1/devices/" + devEUI + "/devstatus", ""},
 
-		{"ListModels", func(c *Client) error { _, e := c.ListModels(context.Background()); return e },
+		{"ListModels", func(client *Client) error { _, e := client.ListModels(context.Background()); return e },
 			http.MethodGet, "/api/v1/models", ""},
-		{"Model", func(c *Client) error { _, e := c.Model(context.Background(), model); return e },
+		{"Model", func(client *Client) error { _, e := client.Model(context.Background(), model); return e },
 			http.MethodGet, "/api/v1/models/" + model, ""},
-		{"CreateModel", func(c *Client) error {
-			_, e := c.CreateModel(context.Background(), model, json.RawMessage(`{}`))
+		{"CreateModel", func(client *Client) error {
+			_, e := client.CreateModel(context.Background(), model, json.RawMessage(`{}`))
 			return e
 		}, http.MethodPost, "/api/v1/models/" + model, ""},
-		{"UpdateModel", func(c *Client) error {
-			_, e := c.UpdateModel(context.Background(), model, json.RawMessage(`{}`))
+		{"UpdateModel", func(client *Client) error {
+			_, e := client.UpdateModel(context.Background(), model, json.RawMessage(`{}`))
 			return e
 		}, http.MethodPut, "/api/v1/models/" + model, ""},
-		{"DeleteModel", func(c *Client) error { _, e := c.DeleteModel(context.Background(), model); return e },
+		{"DeleteModel", func(client *Client) error { _, e := client.DeleteModel(context.Background(), model); return e },
 			http.MethodDelete, "/api/v1/models/" + model, ""},
-		{"TestModelDecode", func(c *Client) error {
-			_, e := c.TestModelDecode(context.Background(), model, json.RawMessage(`{}`))
+		{"TestModelDecode", func(client *Client) error {
+			_, e := client.TestModelDecode(context.Background(), model, json.RawMessage(`{}`))
 			return e
 		}, http.MethodPost, "/api/v1/models/" + model + "/decode", ""},
 
-		{"Uplinks network-wide", func(c *Client) error { _, e := c.Uplinks(context.Background(), "", 20); return e },
+		{"Uplinks network-wide", func(client *Client) error { _, e := client.Uplinks(context.Background(), "", 20); return e },
 			http.MethodGet, "/api/v1/uplinks", "limit=20"},
-		{"Uplinks for one device", func(c *Client) error { _, e := c.Uplinks(context.Background(), devEUI, 5); return e },
+		{"Uplinks for one device", func(client *Client) error { _, e := client.Uplinks(context.Background(), devEUI, 5); return e },
 			http.MethodGet, "/api/v1/uplinks", "dev_eui=" + devEUI + "&limit=5"},
 
-		{"ListIntegrations", func(c *Client) error { _, e := c.ListIntegrations(context.Background()); return e },
+		{"ListIntegrations", func(client *Client) error { _, e := client.ListIntegrations(context.Background()); return e },
 			http.MethodGet, "/api/v1/integrations", ""},
-		{"CreateIntegration", func(c *Client) error {
-			_, e := c.CreateIntegration(context.Background(), json.RawMessage(`{}`))
+		{"CreateIntegration", func(client *Client) error {
+			_, e := client.CreateIntegration(context.Background(), json.RawMessage(`{}`))
 			return e
 		}, http.MethodPost, "/api/v1/integrations", ""},
-		{"Integration", func(c *Client) error { _, e := c.Integration(context.Background(), testIntegrationID); return e },
+		{"Integration", func(client *Client) error {
+			_, e := client.Integration(context.Background(), testIntegrationID)
+			return e
+		},
 			http.MethodGet, "/api/v1/integrations/" + testIntegrationID, ""},
-		{"UpdateIntegration", func(c *Client) error {
-			_, e := c.UpdateIntegration(context.Background(), testIntegrationID, json.RawMessage(`{}`))
+		{"UpdateIntegration", func(client *Client) error {
+			_, e := client.UpdateIntegration(context.Background(), testIntegrationID, json.RawMessage(`{}`))
 			return e
 		}, http.MethodPut, "/api/v1/integrations/" + testIntegrationID, ""},
-		{"DeleteIntegration", func(c *Client) error { _, e := c.DeleteIntegration(context.Background(), testIntegrationID); return e },
+		{"DeleteIntegration", func(client *Client) error {
+			_, e := client.DeleteIntegration(context.Background(), testIntegrationID)
+			return e
+		},
 			http.MethodDelete, "/api/v1/integrations/" + testIntegrationID, ""},
-		{"TestIntegration", func(c *Client) error { _, e := c.TestIntegration(context.Background(), testIntegrationID); return e },
+		{"TestIntegration", func(client *Client) error {
+			_, e := client.TestIntegration(context.Background(), testIntegrationID)
+			return e
+		},
 			http.MethodPost, "/api/v1/integrations/" + testIntegrationID + "/test", ""},
 
 		// Health is read from the status port and is not under the API prefix,
 		// because the network server serves it from a separate mux.
-		{"Status", func(c *Client) error { _, e := c.Status(context.Background()); return e },
+		{"Status", func(client *Client) error { _, e := client.Status(context.Background()); return e },
 			http.MethodGet, "/status", ""},
 	}
 }

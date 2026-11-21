@@ -180,25 +180,25 @@ func NewMQTT(cfg MQTTConfig) (*MQTT, error) {
 	}
 
 	raw := strings.TrimSpace(cfg.BrokerURL)
-	u, err := url.Parse(raw)
+	parsedURL, err := url.Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("integration: MQTT broker URL %q: %w", cfg.BrokerURL, err)
 	}
-	switch u.Scheme {
+	switch parsedURL.Scheme {
 	case "tcp", "ssl", "tls", "mqtt", "mqtts", "ws", "wss":
 	default:
 		return nil, fmt.Errorf(
-			"integration: MQTT broker scheme %q is not supported (use tcp, tls, mqtts, ws or wss)", u.Scheme)
+			"integration: MQTT broker scheme %q is not supported (use tcp, tls, mqtts, ws or wss)", parsedURL.Scheme)
 	}
-	if u.Host == "" {
+	if parsedURL.Host == "" {
 		return nil, fmt.Errorf("integration: MQTT broker URL %q has no host", cfg.BrokerURL)
 	}
-	secured := u.Scheme == "tls" || u.Scheme == "ssl" || u.Scheme == "mqtts" || u.Scheme == "wss"
+	secured := parsedURL.Scheme == "tls" || parsedURL.Scheme == "ssl" || parsedURL.Scheme == "mqtts" || parsedURL.Scheme == "wss"
 	if secured && cfg.InsecureSkipVerify {
 		// Worth a line at every start: this connection is encrypted but not
 		// authenticated, so it does not protect against an active attacker.
 		cfg.Logger.Warn("MQTT integration skips broker certificate verification",
-			"broker", u.Host, "why", "InsecureSkipVerify is set")
+			"broker", parsedURL.Host, "why", "InsecureSkipVerify is set")
 	}
 
 	tmpl, err := parseMQTTTopic(cfg.Topic)
@@ -231,45 +231,45 @@ func NewMQTT(cfg MQTTConfig) (*MQTT, error) {
 		opts.SetPassword(cfg.Password)
 	}
 
-	m := &MQTT{
+	publisher := &MQTT{
 		cfg:  cfg,
 		tmpl: tmpl,
-		host: u.Host,
-		log:  cfg.Logger.With("component", "integration", "sink", "mqtt", "broker", u.Host),
+		host: parsedURL.Host,
+		log:  cfg.Logger.With("component", "integration", "sink", "mqtt", "broker", parsedURL.Host),
 	}
 
 	// Connection state is tracked here rather than asked of paho, whose
 	// IsConnected() reports true while ConnectRetry is still trying. See the
 	// note on MQTT.connected.
 	opts.OnConnect = func(mqtt.Client) {
-		m.connected.Store(true)
-		m.log.Info("MQTT broker connected", "topic", tmpl.raw)
+		publisher.connected.Store(true)
+		publisher.log.Info("MQTT broker connected", "topic", tmpl.raw)
 	}
 	opts.OnConnectionLost = func(_ mqtt.Client, err error) {
-		m.connected.Store(false)
-		m.log.Warn("MQTT broker connection lost", "err", err)
+		publisher.connected.Store(false)
+		publisher.log.Warn("MQTT broker connection lost", "err", err)
 	}
 	// Reconnecting covers the case where a connection was dropped and a new one
 	// is being attempted: OnConnectionLost already cleared the flag, but a
 	// ConnectRetry that has never succeeded fires this without ever having been
 	// connected, and clearing twice costs nothing.
 	opts.OnReconnecting = func(mqtt.Client, *mqtt.ClientOptions) {
-		m.connected.Store(false)
+		publisher.connected.Store(false)
 	}
 
 	client := mqtt.NewClient(opts)
-	m.token = client
+	publisher.token = client
 
 	// Ask for the connection now so a reachable broker is warm before the first
 	// event. ConnectRetry makes this return without error when the broker is
 	// down, which is the behaviour described above.
 	if token := client.Connect(); !token.WaitTimeout(cfg.ConnectTimeout) {
-		m.log.Info("MQTT broker not reachable yet; retrying in the background",
+		publisher.log.Info("MQTT broker not reachable yet; retrying in the background",
 			"timeout", cfg.ConnectTimeout)
 	} else if err := token.Error(); err != nil {
-		m.log.Warn("MQTT broker refused the connection; retrying in the background", "err", err)
+		publisher.log.Warn("MQTT broker refused the connection; retrying in the background", "err", err)
 	}
-	return m, nil
+	return publisher, nil
 }
 
 // mqttClientID derives a descriptive client ID. A broker logs client IDs, so

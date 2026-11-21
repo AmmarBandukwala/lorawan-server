@@ -102,26 +102,26 @@ func TestDispatcherWritesThroughToTheStore(t *testing.T) {
 func TestDispatcherSkipsMACOnlyFrames(t *testing.T) {
 	store := engine.NewMemStore()
 	sink := &recordingSink{name: "sink"}
-	d := New(store, []Sink{sink}, Config{Logger: quietLogger()})
-	defer d.Close()
+	dispatcher := New(store, []Sink{sink}, Config{Logger: quietLogger()})
+	defer dispatcher.Close()
 
 	ctx := context.Background()
 	macOnly := uplinkRecord()
 	macOnly.FPort = -1
-	if err := d.RecordUplink(ctx, macOnly); err != nil {
+	if err := dispatcher.RecordUplink(ctx, macOnly); err != nil {
 		t.Fatalf("RecordUplink: %v", err)
 	}
 	withData := uplinkRecord()
-	if err := d.RecordUplink(ctx, withData); err != nil {
+	if err := dispatcher.RecordUplink(ctx, withData); err != nil {
 		t.Fatalf("RecordUplink: %v", err)
 	}
-	if err := d.RecordEvent(ctx, engine.Event{
+	if err := dispatcher.RecordEvent(ctx, engine.Event{
 		Kind: engine.EventJoinAccept, DevEUI: withData.DevEUI, At: withData.At,
 	}); err != nil {
 		t.Fatalf("RecordEvent: %v", err)
 	}
 	// A kind the application does not care about must not be forwarded.
-	if err := d.RecordEvent(ctx, engine.Event{Kind: engine.EventMAC, DevEUI: withData.DevEUI}); err != nil {
+	if err := dispatcher.RecordEvent(ctx, engine.Event{Kind: engine.EventMAC, DevEUI: withData.DevEUI}); err != nil {
 		t.Fatalf("RecordEvent: %v", err)
 	}
 
@@ -133,7 +133,7 @@ func TestDispatcherSkipsMACOnlyFrames(t *testing.T) {
 	if events[1].Kind != KindJoin {
 		t.Errorf("second event kind = %q, want join", events[1].Kind)
 	}
-	if got := d.Stats().Queued; got != 0 {
+	if got := dispatcher.Stats().Queued; got != 0 {
 		t.Errorf("queue depth = %d after delivery, want 0", got)
 	}
 }

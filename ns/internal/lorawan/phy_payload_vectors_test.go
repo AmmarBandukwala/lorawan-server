@@ -114,34 +114,34 @@ func TestUplinkData_ParseValidateDecrypt(t *testing.T) {
 	appSKey := mustKey(t, "100f0e0d0c0b0a090807060504030201")
 	wire := mustHex(t, "80040302010300000673070ae264d4f7e117d2c0")
 
-	p, err := lorawan.ParsePHYPayload(wire)
+	frame, err := lorawan.ParsePHYPayload(wire)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.MHDR.MType != lorawan.MTypeConfirmedDataUp {
-		t.Errorf("lorawan.MType = %s, want ConfirmedDataUp", p.MHDR.MType)
+	if frame.MHDR.MType != lorawan.MTypeConfirmedDataUp {
+		t.Errorf("lorawan.MType = %s, want ConfirmedDataUp", frame.MHDR.MType)
 	}
-	if p.MAC.FHDR.DevAddr.String() != "01020304" {
-		t.Errorf("lorawan.DevAddr = %s, want 01020304", p.MAC.FHDR.DevAddr)
+	if frame.MAC.FHDR.DevAddr.String() != "01020304" {
+		t.Errorf("lorawan.DevAddr = %s, want 01020304", frame.MAC.FHDR.DevAddr)
 	}
-	if p.MAC.FPort == nil || *p.MAC.FPort != 10 {
-		t.Errorf("lorawan.FPort = %v, want 10", p.MAC.FPort)
+	if frame.MAC.FPort == nil || *frame.MAC.FPort != 10 {
+		t.Errorf("lorawan.FPort = %v, want 10", frame.MAC.FPort)
 	}
 
-	ok, err := p.ValidateDataMIC(lorawan.DirUplink, 0, nwkSKey)
+	ok, err := frame.ValidateDataMIC(lorawan.DirUplink, 0, nwkSKey)
 	if err != nil || !ok {
 		t.Fatalf("ValidateDataMIC = %v, %v", ok, err)
 	}
 
-	if err := p.DecryptFRMPayload(appSKey, lorawan.DirUplink, 0); err != nil {
+	if err := frame.DecryptFRMPayload(appSKey, lorawan.DirUplink, 0); err != nil {
 		t.Fatal(err)
 	}
-	if got := hex.EncodeToString(p.MAC.FRMPayload); got != "01020304" {
+	if got := hex.EncodeToString(frame.MAC.FRMPayload); got != "01020304" {
 		t.Errorf("lorawan.FRMPayload = %s, want 01020304", got)
 	}
 
 	// lorawan.FOpts carries DevStatusAns {battery: 115, snr: 7}.
-	set, err := lorawan.ParseMACCommandSet(p.MAC.FHDR.FOpts, true)
+	set, err := lorawan.ParseMACCommandSet(frame.MAC.FHDR.FOpts, true)
 	if err != nil {
 		t.Fatal(err)
 	}

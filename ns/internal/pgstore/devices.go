@@ -35,7 +35,7 @@ func (s *Store) DeviceByDevAddr(ctx context.Context, devAddr lorawan.DevAddr) (*
 
 func scanDevice(row pgx.Row) (*engine.Device, error) {
 	var (
-		d                engine.Device
+		device           engine.Device
 		devEUI, joinEUI  string
 		activationMode   string
 		appKey, nwkSKey  string
@@ -51,10 +51,10 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 	)
 
 	err = row.Scan(
-		&devEUI, &joinEUI, &d.Name, &d.Enabled, &activationMode, &appKey,
+		&devEUI, &joinEUI, &device.Name, &device.Enabled, &activationMode, &appKey,
 		&devAddr, &nwkSKey, &appSKey, &nextJoinNonce, &nonces,
-		&d.MaxDataRate, &d.MinDataRate, &d.MaxTxPower, &d.Rx1Delay, &d.Rx2DataRate,
-		&rx2FrequencyHz, &d.SupportsClassC, &d.DisableADR, &d.Group, &d.ModelID,
+		&device.MaxDataRate, &device.MinDataRate, &device.MaxTxPower, &device.Rx1Delay, &device.Rx2DataRate,
+		&rx2FrequencyHz, &device.SupportsClassC, &device.DisableADR, &device.Group, &device.ModelID,
 		&attrs, &latitude, &longitude, &altitude,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -64,28 +64,28 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 		return nil, fmt.Errorf("pgstore: device query: %w", err)
 	}
 
-	if d.DevEUI, err = parseEUI(devEUI); err != nil {
+	if device.DevEUI, err = parseEUI(devEUI); err != nil {
 		return nil, err
 	}
-	if d.JoinEUI, err = parseEUI(joinEUI); err != nil {
+	if device.JoinEUI, err = parseEUI(joinEUI); err != nil {
 		return nil, err
 	}
-	if d.AppKey, err = parseKey(appKey); err != nil {
+	if device.AppKey, err = parseKey(appKey); err != nil {
 		return nil, err
 	}
-	if d.NwkSKey, err = parseKey(nwkSKey); err != nil {
+	if device.NwkSKey, err = parseKey(nwkSKey); err != nil {
 		return nil, err
 	}
-	if d.AppSKey, err = parseKey(appSKey); err != nil {
+	if device.AppSKey, err = parseKey(appSKey); err != nil {
 		return nil, err
 	}
-	if d.DevAddr, err = parseDevAddr(devAddr); err != nil {
+	if device.DevAddr, err = parseDevAddr(devAddr); err != nil {
 		return nil, err
 	}
-	if d.UsedDevNonces, err = devNoncesFromJSON(nonces); err != nil {
+	if device.UsedDevNonces, err = devNoncesFromJSON(nonces); err != nil {
 		return nil, err
 	}
-	if d.Attributes, err = attributesFromJSON(attrs); err != nil {
+	if device.Attributes, err = attributesFromJSON(attrs); err != nil {
 		return nil, err
 	}
 	// A position is only assembled when both coordinates are present. The
@@ -97,12 +97,12 @@ func scanDevice(row pgx.Row) (*engine.Device, error) {
 		if altitude != nil {
 			loc.Altitude = int(*altitude)
 		}
-		d.Location = &loc
+		device.Location = &loc
 	}
-	d.OTAA = activationMode == "OTAA"
-	d.NextJoinNonce = uint32(nextJoinNonce)
-	d.Rx2FrequencyHz = uint32(rx2FrequencyHz)
-	return &d, nil
+	device.OTAA = activationMode == "OTAA"
+	device.NextJoinNonce = uint32(nextJoinNonce)
+	device.Rx2FrequencyHz = uint32(rx2FrequencyHz)
+	return &device, nil
 }
 
 // attributesFromJSON decodes the attributes column. An empty object becomes nil
@@ -146,27 +146,27 @@ func locationArgs(loc *engine.Location) (lat, long, alt any) {
 }
 
 // SaveDevice implements engine.DeviceRepo, inserting or fully updating the row.
-func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
-	nonces, err := devNoncesJSON(d.UsedDevNonces)
+func (s *Store) SaveDevice(ctx context.Context, device *engine.Device) error {
+	nonces, err := devNoncesJSON(device.UsedDevNonces)
 	if err != nil {
 		return err
 	}
 
 	activationMode := "ABP"
-	if d.OTAA {
+	if device.OTAA {
 		activationMode = "OTAA"
 	}
-	attrs, err := attributesJSON(d.Attributes)
+	attrs, err := attributesJSON(device.Attributes)
 	if err != nil {
 		return err
 	}
-	lat, long, alt := locationArgs(d.Location)
+	lat, long, alt := locationArgs(device.Location)
 	// An OTAA device that has not joined yet has no address; storing NULL keeps
 	// the UNIQUE constraint meaningful (several unjoined devices must not all
 	// claim "00000000").
 	var devAddr any
-	if !d.OTAA || d.DevAddr != 0 {
-		devAddr = devAddrText(d.DevAddr)
+	if !device.OTAA || device.DevAddr != 0 {
+		devAddr = devAddrText(device.DevAddr)
 	}
 
 	_, err = s.pool.Exec(ctx, `
@@ -206,11 +206,11 @@ func (s *Store) SaveDevice(ctx context.Context, d *engine.Device) error {
 			altitude          = EXCLUDED.altitude,
 			model_id          = EXCLUDED.model_id,
 			updated_at        = now()`,
-		euiText(d.DevEUI), euiText(d.JoinEUI), d.Name, d.Enabled, activationMode, keyText(d.AppKey),
-		devAddr, keyText(d.NwkSKey), keyText(d.AppSKey), int64(d.NextJoinNonce), string(nonces),
-		d.MaxDataRate, d.MinDataRate, d.MaxTxPower, d.Rx1Delay, d.Rx2DataRate,
-		int64(d.Rx2FrequencyHz), d.SupportsClassC, d.DisableADR, d.Group,
-		attrs, lat, long, alt, d.ModelID,
+		euiText(device.DevEUI), euiText(device.JoinEUI), device.Name, device.Enabled, activationMode, keyText(device.AppKey),
+		devAddr, keyText(device.NwkSKey), keyText(device.AppSKey), int64(device.NextJoinNonce), string(nonces),
+		device.MaxDataRate, device.MinDataRate, device.MaxTxPower, device.Rx1Delay, device.Rx2DataRate,
+		int64(device.Rx2FrequencyHz), device.SupportsClassC, device.DisableADR, device.Group,
+		attrs, lat, long, alt, device.ModelID,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore: save device: %w", err)

@@ -49,14 +49,14 @@ func (s *Server) dispatch(sess *session, payload []byte) {
 
 // handleVersion answers the handshake with the configuration.
 func (s *Server) handleVersion(sess *session, payload []byte) {
-	var v version
-	if err := json.Unmarshal(payload, &v); err != nil {
+	var msg version
+	if err := json.Unmarshal(payload, &msg); err != nil {
 		s.log.Warn("cannot parse a version message", "gateway", sess.eui, "err", err)
 		return
 	}
 	// Recorded before anything can fail: which firmware a station is on is the
 	// first thing an operator needs, and the station only says it once.
-	sess.noteVersion(v)
+	sess.noteVersion(msg)
 
 	reg, err := s.region()
 	if err != nil {
@@ -98,8 +98,8 @@ func (s *Server) handleVersion(sess *session, payload []byte) {
 		return
 	}
 	s.log.Info("gateway handshake complete",
-		"gateway", sess.eui, "station", v.Station, "model", v.Model,
-		"firmware", v.Firmware, "protocol", v.Protocol, "region", cfg.Region)
+		"gateway", sess.eui, "station", msg.Station, "model", msg.Model,
+		"firmware", msg.Firmware, "protocol", msg.Protocol, "region", cfg.Region)
 }
 
 // handleTimeSync answers a station's clock query.

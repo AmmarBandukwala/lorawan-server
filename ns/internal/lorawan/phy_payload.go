@@ -54,7 +54,7 @@ func ParsePHYPayload(wire []byte) (*PHYPayload, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &PHYPayload{MHDR: mhdr}
+	frame := &PHYPayload{MHDR: mhdr}
 	switch mhdr.MType {
 	case MTypeJoinRequest:
 		// MHDR(1) + JoinEUI(8) + DevEUI(8) + DevNonce(2) + MIC(4) = 23.
@@ -69,13 +69,13 @@ func ParsePHYPayload(wire []byte) (*PHYPayload, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.JoinRequest = &JoinRequestPayload{
+		frame.JoinRequest = &JoinRequestPayload{
 			JoinEUI:  joinEUI,
 			DevEUI:   devEUI,
 			DevNonce: uint16(wire[17]) | uint16(wire[18])<<8,
 		}
-		copy(p.MIC[:], wire[19:23])
-		return p, nil
+		copy(frame.MIC[:], wire[19:23])
+		return frame, nil
 
 	case MTypeJoinAccept:
 		return nil, fmt.Errorf("use ParseJoinAccept for join-accept frames")
@@ -100,9 +100,9 @@ func ParsePHYPayload(wire []byte) (*PHYPayload, error) {
 		default:
 			return nil, fmt.Errorf("frame truncated after FHDR")
 		}
-		copy(p.MIC[:], rest[len(rest)-4:])
-		p.MAC = mac
-		return p, nil
+		copy(frame.MIC[:], rest[len(rest)-4:])
+		frame.MAC = mac
+		return frame, nil
 	}
 }
 

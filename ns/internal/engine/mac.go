@@ -29,7 +29,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 	for _, cmd := range cmds {
 		switch cmd.CID {
 		case lorawan.CIDLinkADR: // uplink: LinkADRAns
-			p, err := lorawan.ParseLinkADRAns(cmd.Payload)
+			payload, err := lorawan.ParseLinkADRAns(cmd.Payload)
 			if err != nil {
 				e.malformed(ctx, session, "LinkADRAns", err)
 				continue
@@ -38,7 +38,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 			// The device answered, so however many attempts it took, the
 			// exchange is over and the budget starts again for the next one.
 			session.LinkADRRetries = 0
-			if p.PowerACK && p.DataRateACK && p.ChannelACK {
+			if payload.PowerACK && payload.DataRateACK && payload.ChannelACK {
 				if req := session.PendingADR; req != nil {
 					session.DataRate = req.DataRate
 					session.TxPower = req.TxPower
@@ -56,32 +56,32 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Reason: ReasonLinkADRRejected,
 					Detail: fmt.Sprintf("LinkADR refused (power=%t data-rate=%t channel=%t), keeping DR%d TX%d",
-						p.PowerACK, p.DataRateACK, p.ChannelACK, session.DataRate, session.TxPower),
+						payload.PowerACK, payload.DataRateACK, payload.ChannelACK, session.DataRate, session.TxPower),
 				})
 			}
 
 		case lorawan.CIDDevStatus: // uplink: DevStatusAns
-			p, err := lorawan.ParseDevStatusAns(cmd.Payload)
+			payload, err := lorawan.ParseDevStatusAns(cmd.Payload)
 			if err != nil {
 				e.malformed(ctx, session, "DevStatusAns", err)
 				continue
 			}
 			session.HasDeviceStatus = true
-			session.Battery = p.Battery
-			session.Margin = p.SNR
+			session.Battery = payload.Battery
+			session.Margin = payload.SNR
 			e.recordEvent(ctx, Event{
 				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
-				Detail: fmt.Sprintf("device status: battery %d/255, margin %d dB", p.Battery, p.SNR),
+				Detail: fmt.Sprintf("device status: battery %d/255, margin %d dB", payload.Battery, payload.SNR),
 			})
 
 		case lorawan.CIDRXParamSetup: // uplink: RXParamSetupAns
-			p, err := lorawan.ParseRXParamSetupAns(cmd.Payload)
+			payload, err := lorawan.ParseRXParamSetupAns(cmd.Payload)
 			if err != nil {
 				e.malformed(ctx, session, "RXParamSetupAns", err)
 				continue
 			}
 			if req := session.PendingRX2; req != nil {
-				if p.RX2Frequency {
+				if payload.RX2Frequency {
 					session.Rx2FrequencyHz = req.FrequencyHz
 					session.Rx2DataRate = req.DataRate
 				}
@@ -90,7 +90,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 			e.recordEvent(ctx, Event{
 				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 				Detail: fmt.Sprintf("RXParamSetup answer (channel=%t rx2-freq=%t rx1-dr-offset=%t), RX2 now %d Hz / DR%d",
-					p.Channel, p.RX2Frequency, p.RX1DROffset, session.Rx2FrequencyHz, session.Rx2DataRate),
+					payload.Channel, payload.RX2Frequency, payload.RX1DROffset, session.Rx2FrequencyHz, session.Rx2DataRate),
 			})
 
 		case lorawan.CIDRXTimingSetup: // uplink: RXTimingSetupAns (no payload)
@@ -154,7 +154,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 			})
 
 		case lorawan.CIDNewChannel: // uplink: NewChannelAns
-			p, err := lorawan.ParseNewChannelAns(cmd.Payload)
+			payload, err := lorawan.ParseNewChannelAns(cmd.Payload)
 			if err != nil {
 				e.malformed(ctx, session, "NewChannelAns", err)
 				continue
@@ -168,11 +168,11 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Reason: ReasonUnexpectedMACAnswer,
 					Detail: fmt.Sprintf("NewChannelAns with no request outstanding (frequency-ok=%t data-rate-ok=%t)",
-						p.ChannelFreqOK, p.DataRateRangeOK),
+						payload.ChannelFreqOK, payload.DataRateRangeOK),
 				})
 				continue
 			}
-			if p.ChannelFreqOK && p.DataRateRangeOK {
+			if payload.ChannelFreqOK && payload.DataRateRangeOK {
 				if session.UserChannels == nil {
 					session.UserChannels = map[int]region.Channel{}
 				}
@@ -203,7 +203,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *S
 				Reason: ReasonNewChannelRefused,
 				Detail: fmt.Sprintf("device refused channel %d (%d Hz, DR%d..DR%d): frequency-ok=%t data-rate-ok=%t",
 					req.Index, req.FrequencyHz, req.MinDataRate, req.MaxDataRate,
-					p.ChannelFreqOK, p.DataRateRangeOK),
+					payload.ChannelFreqOK, payload.DataRateRangeOK),
 			})
 
 		default:

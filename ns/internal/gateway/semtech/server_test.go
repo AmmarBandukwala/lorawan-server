@@ -155,28 +155,28 @@ func TestPushDataReachesTheHandlerWithRadioMetadata(t *testing.T) {
 	}
 
 	select {
-	case f := <-sink.frames:
-		if f.GatewayID != mustEUI(t, testGwEUI) {
-			t.Errorf("GatewayID = %s", f.GatewayID)
+	case frame := <-sink.frames:
+		if frame.GatewayID != mustEUI(t, testGwEUI) {
+			t.Errorf("GatewayID = %s", frame.GatewayID)
 		}
-		if f.FrequencyHz != 868100000 {
-			t.Errorf("FrequencyHz = %d, want 868100000", f.FrequencyHz)
+		if frame.FrequencyHz != 868100000 {
+			t.Errorf("FrequencyHz = %d, want 868100000", frame.FrequencyHz)
 		}
-		if f.DataRateIndex != 5 {
-			t.Errorf("DataRateIndex = %d, want 5 (SF7BW125 on EU868)", f.DataRateIndex)
+		if frame.DataRateIndex != 5 {
+			t.Errorf("DataRateIndex = %d, want 5 (SF7BW125 on EU868)", frame.DataRateIndex)
 		}
-		if f.RSSI != -71.5 || f.SNR != 9.2 {
-			t.Errorf("RSSI/SNR = %v/%v", f.RSSI, f.SNR)
+		if frame.RSSI != -71.5 || frame.SNR != 9.2 {
+			t.Errorf("RSSI/SNR = %v/%v", frame.RSSI, frame.SNR)
 		}
-		if f.RxWindow != gateway.RxWindow1 {
-			t.Errorf("RxWindow = %s, want RX1", f.RxWindow)
+		if frame.RxWindow != gateway.RxWindow1 {
+			t.Errorf("RxWindow = %s, want RX1", frame.RxWindow)
 		}
-		if len(f.PHYPayload) != 12 {
-			t.Errorf("PHYPayload = %d bytes, want 12", len(f.PHYPayload))
+		if len(frame.PHYPayload) != 12 {
+			t.Errorf("PHYPayload = %d bytes, want 12", len(frame.PHYPayload))
 		}
 		// The token has to carry the concentrator timestamp, or the downlink
 		// cannot be placed in the right slot.
-		if _, _, ts, hasTS := parseToken(f.UplinkID); !hasTS ||
+		if _, _, ts, hasTS := parseToken(frame.UplinkID); !hasTS ||
 			ts != 1234567890*time.Microsecond {
 			t.Errorf("token timestamp = %v (known=%v), want 1234567890us", ts, hasTS)
 		}
