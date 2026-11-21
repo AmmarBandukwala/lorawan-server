@@ -11,6 +11,9 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+// ApplyMigrations applies every embedded SQL file that has not been applied
+// yet, each in its own transaction, and records it in schema_migrations so a
+// restart costs nothing.
 func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if _, err := pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		migration_id TEXT PRIMARY KEY,

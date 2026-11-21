@@ -94,6 +94,8 @@ func normalizeHex(value string) string {
 // a fake, and what keeps nsclient free of dashboard vocabulary.
 type NSProvisioner struct{ client *nsclient.Client }
 
+// NewNSProvisioner wraps a network-server client so handlers can provision
+// devices through the Provisioner interface without importing nsclient.
 func NewNSProvisioner(client *nsclient.Client) *NSProvisioner {
 	return &NSProvisioner{client: client}
 }

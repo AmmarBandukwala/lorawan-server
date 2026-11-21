@@ -49,6 +49,8 @@ type ProvisionedDevice struct {
 	Activation string
 }
 
+// Server holds the handlers' shared dependencies: where inventory is read
+// from, how devices get provisioned, and how the live network is controlled.
 type Server struct {
 	repository  Repository
 	provisioner Provisioner

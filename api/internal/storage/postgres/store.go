@@ -27,6 +27,8 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+// New returns a Store backed by an already-opened pool. Opening the pool is
+// the caller's job, so connection settings stay in one place at startup.
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }

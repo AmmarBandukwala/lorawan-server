@@ -13,6 +13,9 @@ type LinkCheckAnsPayload struct {
 
 func (p LinkCheckAnsPayload) Marshal() []byte { return []byte{byte(p.Margin), p.GwCnt} }
 
+// ParseLinkCheckAns decodes the two bytes a gateway cluster returns for a
+// LinkCheckReq: a signed margin in dB above the demodulation floor, and how
+// many gateways heard the request.
 func ParseLinkCheckAns(payload []byte) (LinkCheckAnsPayload, error) {
 	if len(payload) != 2 {
 		return LinkCheckAnsPayload{}, errLen("LinkCheckAns", 2, len(payload))
@@ -37,6 +40,9 @@ func (p LinkADRReqPayload) Marshal() []byte {
 	}
 }
 
+// ParseLinkADRReq splits a four-byte LinkADRReq into its fields. Data rate and
+// transmit power share one byte, and NbRep shares another with ChMaskCntl, so
+// the halves are unpacked once here rather than at every place that reads them.
 func ParseLinkADRReq(payload []byte) (LinkADRReqPayload, error) {
 	var p LinkADRReqPayload
 	if len(payload) != 4 {
@@ -71,6 +77,9 @@ func (p LinkADRAnsPayload) Marshal() []byte {
 	return []byte{b}
 }
 
+// ParseLinkADRAns reads the three acknowledgement bits a device sets for a
+// LinkADRReq. A device that accepts part of the request clears only those bits,
+// so they stay separate instead of collapsing into one yes/no.
 func ParseLinkADRAns(payload []byte) (LinkADRAnsPayload, error) {
 	if len(payload) != 1 {
 		return LinkADRAnsPayload{}, errLen("LinkADRAns", 1, len(payload))
@@ -98,6 +107,9 @@ func (p DevStatusAnsPayload) Marshal() []byte {
 	return []byte{p.Battery, byte(p.SNR) & 0x3f}
 }
 
+// ParseDevStatusAns reads a battery level and a demodulation margin. The margin
+// is a signed 6-bit two's-complement value, so it is sign-extended before
+// becoming an int8; reading it as a plain byte would turn -8 into 56.
 func ParseDevStatusAns(payload []byte) (DevStatusAnsPayload, error) {
 	if len(payload) != 2 {
 		return DevStatusAnsPayload{}, errLen("DevStatusAns", 2, len(payload))
@@ -127,6 +139,8 @@ func (p RXParamSetupReqPayload) Marshal() ([]byte, error) {
 	return append(f[:], p.DLSettings.Byte()), nil
 }
 
+// ParseRXParamSetupReq decodes the three-byte RX2 frequency followed by the
+// DLSettings byte.
 func ParseRXParamSetupReq(payload []byte) (RXParamSetupReqPayload, error) {
 	var p RXParamSetupReqPayload
 	if len(payload) != 4 {
@@ -162,6 +176,8 @@ func (p RXParamSetupAnsPayload) Marshal() []byte {
 	return []byte{b}
 }
 
+// ParseRXParamSetupAns reads which of the three RX parameters the device
+// accepted: the channel, the RX2 frequency, and the RX1 data-rate offset.
 func ParseRXParamSetupAns(payload []byte) (RXParamSetupAnsPayload, error) {
 	if len(payload) != 1 {
 		return RXParamSetupAnsPayload{}, errLen("RXParamSetupAns", 1, len(payload))
@@ -194,6 +210,8 @@ func (p NewChannelReqPayload) Marshal() ([]byte, error) {
 	return []byte{p.ChIndex, f[0], f[1], f[2], p.MinDR<<4 | p.MaxDR&0x0f}, nil
 }
 
+// ParseNewChannelReq decodes a request to add or change a channel: its index,
+// its frequency, and the data-rate range it may carry, which share one byte.
 func ParseNewChannelReq(payload []byte) (NewChannelReqPayload, error) {
 	var p NewChannelReqPayload
 	if len(payload) != 5 {
@@ -216,6 +234,9 @@ type NewChannelAnsPayload struct {
 	ChannelFreqOK   bool
 }
 
+// ParseNewChannelAns reads whether the device accepts the channel frequency and
+// the data-rate range. A device answers no to either without rejecting the
+// whole command.
 func ParseNewChannelAns(payload []byte) (NewChannelAnsPayload, error) {
 	if len(payload) != 1 {
 		return NewChannelAnsPayload{}, errLen("NewChannelAns", 1, len(payload))
@@ -264,6 +285,9 @@ type DLChannelAnsPayload struct {
 	UplinkFreqExists bool
 }
 
+// ParseDLChannelAns reads the two bits a device returns for a DLChannelReq:
+// whether the downlink frequency is acceptable, and whether a paired uplink
+// frequency exists to schedule against.
 func ParseDLChannelAns(payload []byte) (DLChannelAnsPayload, error) {
 	if len(payload) != 1 {
 		return DLChannelAnsPayload{}, errLen("DLChannelAns", 1, len(payload))

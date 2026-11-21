@@ -189,6 +189,7 @@ func (r *Router) Names() []string {
 // "no transport yet" case an explicit error instead of a nil dereference. In
 // practice the value installed is a Router, so the engine sees one transmitter
 // however many protocols the deployment speaks.
+// Lazy defers to whichever transport is installed after construction.
 type Lazy struct {
 	mu sync.RWMutex
 	gw Gateway

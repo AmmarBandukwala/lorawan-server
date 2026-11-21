@@ -178,6 +178,7 @@ func (l *SharedLedger) Booked(gateway lorawan.EUI64, minHz uint32) time.Duration
 // Every test needs these. A test that ignores a parse error is a test that has
 // quietly stopped testing anything, so these stop the run.
 
+// MustNetID parses a NetID or fails the test, so fixtures read as literals.
 func MustNetID(t *testing.T, s string) lorawan.NetID {
 	t.Helper()
 	n, err := lorawan.ParseNetID(s)
@@ -187,6 +188,7 @@ func MustNetID(t *testing.T, s string) lorawan.NetID {
 	return n
 }
 
+// MustEUI64 parses a 64-bit identifier or fails the test.
 func MustEUI64(t *testing.T, s string) lorawan.EUI64 {
 	t.Helper()
 	e, err := lorawan.ParseEUI64(s)
@@ -196,6 +198,7 @@ func MustEUI64(t *testing.T, s string) lorawan.EUI64 {
 	return e
 }
 
+// MustKey parses a 128-bit key or fails the test.
 func MustKey(t *testing.T, s string) lorawan.AES128Key {
 	t.Helper()
 	k, err := lorawan.ParseAES128Key(s)
@@ -205,6 +208,7 @@ func MustKey(t *testing.T, s string) lorawan.AES128Key {
 	return k
 }
 
+// MustDevAddr parses a device address or fails the test.
 func MustDevAddr(t *testing.T, s string) lorawan.DevAddr {
 	t.Helper()
 	a, err := lorawan.ParseDevAddr(s)
