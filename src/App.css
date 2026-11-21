@@ -444,6 +444,119 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .field-hint { color: #7a877e; font-size: 9px; font-weight: 400; line-height: 1.45; }
 .model-form .form-error { font-size: 9px; }
 
+/* Choosing a destination type is the first decision in this form and the only
+ * one with two branches, so it is a labelled group of options rather than two
+ * bare controls. The generic field rules above stack a label's children
+ * vertically and give every input a text box; both are wrong for a control and
+ * its caption, so these rules restate what a control actually needs rather than
+ * fighting the cascade with !important. */
+.model-form .option-group {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.model-form .option-group legend {
+  padding: 0;
+  color: #7a877e;
+  font-size: 9px;
+  font-weight: 600;
+}
+.model-form .option-row { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* The whole box is the hit target, so the choice can be made anywhere in it. */
+.model-form .option {
+  flex: 1 1 210px;
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 3px 9px;
+  align-items: center;
+  margin: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.model-form .option:hover { border-color: #b6c4ba; background: #fbfcfb; }
+.model-form .option.is-selected { border-color: #28785b; background: #f1f8f4; }
+.model-form .option input[type='radio'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  accent-color: #28785b;
+  cursor: pointer;
+}
+/* The dot takes focus, not the box, so the ring belongs on the dot. */
+.model-form .option input[type='radio']:focus-visible {
+  outline: 2px solid #28785b;
+  outline-offset: 2px;
+}
+.model-form .option b { color: #344139; font-size: 11px; font-weight: 600; }
+.model-form .option span {
+  grid-column: 2;
+  color: #7a877e;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+/* Two columns, deliberately not the form's auto-fit default. With cells of
+ * different heights an auto-fit grid hands out however many columns a wide
+ * screen offers, so the MQTT options ended up on the far side of the form from
+ * the broker address they belong to. A fixed pair keeps the reading order
+ * predictable and collapses to one column before fields get cramped. */
+.model-form.integration-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 720px) {
+  .model-form.integration-form { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* A checkbox and the sentence that explains it are one decision, so they share
+ * a cell. Left as siblings they would be placed in different columns by the
+ * form's auto-fit grid, which reads as two unrelated statements. */
+.model-form .check-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-self: start;
+}
+
+/* A checkbox in this form needs the same correction: its box belongs beside
+ * the caption, not above it. */
+.model-form .console-toggle {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 3px 9px;
+  align-items: center;
+  align-self: start;
+  font-weight: 400;
+}
+.model-form .console-toggle input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  accent-color: #28785b;
+  cursor: pointer;
+}
+.model-form .console-toggle input[type='checkbox']:focus-visible {
+  outline: 2px solid #28785b;
+  outline-offset: 2px;
+}
+
 .model-script { display: flex; flex-direction: column; gap: 6px; color: #7a877e; font-size: 9px; font-weight: 600; }
 .model-script code { color: #2c6a52; font: 9px var(--mono); }
 .model-script textarea { min-height: 240px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcfb; color: #2f3a33; font: 11px/1.6 var(--mono); resize: vertical; }

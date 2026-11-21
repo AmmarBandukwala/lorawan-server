@@ -149,7 +149,7 @@ export function Integrations() {
  * answers the question an operator can act on: after saving, does the far end
  * accept our events?
  */
-function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
+export function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
   id: string
   isNew: boolean
   /** The stored record, when editing. Used to prefill without inventing defaults. */
@@ -250,23 +250,33 @@ function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
         <button className="icon-button" onClick={onClose} aria-label="Close"><X size={16} /></button>
       </div>
 
-      <div className="model-form">
-        <div className="console-toggles">
-          <label className="console-toggle">
-            <input type="radio" name="integration-kind" checked={kind === 'mqtt'} onChange={() => setKind('mqtt')} />
-            MQTT broker
-          </label>
-          <label className="console-toggle">
-            <input type="radio" name="integration-kind" checked={kind === 'webhook'} onChange={() => setKind('webhook')} />
-            Webhook
-          </label>
-        </div>
-        <p className="form-note">
-          {kind === 'mqtt'
-            ? 'One message per event on a topic your own systems subscribe to. The connection stays open, so delivery is near immediate.'
-            : 'One JSON POST per event. Simpler to accept on an existing service, and a signing secret lets the receiver check the request really came from here.'}
-        </p>
+      <div className="model-form integration-form">
+        {/* A fieldset rather than a div so assistive tech announces two radio
+            buttons inside a named group, and the native inputs stay native so
+            the arrow keys move between them. Each option carries its own
+            description: the point of showing both at once is to compare them,
+            and text that changes with the selection cannot be compared. */}
+        <fieldset className="option-group">
+          <legend>Destination type</legend>
+          <div className="option-row">
+            <label className={`option${kind === 'mqtt' ? ' is-selected' : ''}`}>
+              <input type="radio" name="integration-kind" checked={kind === 'mqtt'} onChange={() => setKind('mqtt')} />
+              <b>MQTT broker</b>
+              <span>The connection stays open, so an event leaves as it is produced. Your systems subscribe to a topic.</span>
+            </label>
+            <label className={`option${kind === 'webhook' ? ' is-selected' : ''}`}>
+              <input type="radio" name="integration-kind" checked={kind === 'webhook'} onChange={() => setKind('webhook')} />
+              <b>Webhook</b>
+              <span>One JSON POST per event, which an existing HTTP service can accept without running a broker.</span>
+            </label>
+          </div>
+        </fieldset>
 
+        {/* Each field is one grid cell: caption, control, help and error. The
+            error lives inside the label because the form is an auto-fit grid,
+            and a sibling paragraph becomes a cell of its own column — which is
+            how a validation message ended up beside the wrong field. A span
+            rather than a p because a label may only hold phrasing content. */}
         <label>
           Destination id
           <input
@@ -279,22 +289,24 @@ function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
           {isNew
             ? <small className="field-hint">A stable slug. It appears in logs and in tickets, so pick something a person will still recognise in a year.</small>
             : <small className="field-hint">The id cannot be changed afterwards; delete and re-add to rename it.</small>}
+          {isNew && idProblem && <span className="form-error">{idProblem}</span>}
         </label>
-        {isNew && idProblem && <p className="form-error">{idProblem}</p>}
 
         <label>
           Display name
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Cloud broker" />
+          {nameProblem && <span className="form-error">{nameProblem}</span>}
         </label>
-        {nameProblem && <p className="form-error">{nameProblem}</p>}
 
-        <label className="console-toggle">
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
-          Delivering
-        </label>
-        <p className="form-note">
-          Pausing keeps the settings and stops the network server connecting or sending.
-        </p>
+        <div className="check-block">
+          <label className="console-toggle">
+            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
+            Delivering
+          </label>
+          <p className="form-note">
+            Pausing keeps the settings and stops the network server connecting or sending.
+          </p>
+        </div>
 
         {kind === 'mqtt' ? (
           <>
@@ -309,10 +321,10 @@ function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
               <small className="field-hint">
                 tcp:// for a plain connection, tls:// when the broker expects TLS. 8883 is the usual TLS port, 1883 the plain one.
               </small>
+              {targetProblem && (
+                <span className={isBlockingProblem(targetProblem) ? 'form-error' : 'form-note'}>{targetProblem}</span>
+              )}
             </label>
-            {targetProblem && (
-              <p className={isBlockingProblem(targetProblem) ? 'form-error' : 'form-note'}>{targetProblem}</p>
-            )}
 
             <label>
               Topic
@@ -340,21 +352,26 @@ function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
               </small>
             </label>
 
-            <label className="console-toggle">
-              <input type="checkbox" checked={retain} onChange={(event) => setRetain(event.target.checked)} />
-              Retain the last message per topic
-            </label>
+            {/* Both options and the warning they can raise in one cell, so the
+                warning sits under the box that caused it rather than in
+                whichever column the grid happened to reach. */}
+            <div className="check-block">
+              <label className="console-toggle">
+                <input type="checkbox" checked={retain} onChange={(event) => setRetain(event.target.checked)} />
+                Retain the last message per topic
+              </label>
 
-            <label className="console-toggle">
-              <input type="checkbox" checked={insecure} onChange={(event) => setInsecure(event.target.checked)} />
-              Accept any broker certificate
-            </label>
-            {insecure && (
-              <p className="form-note">
-                <ShieldAlert size={13} /> This encrypts the traffic but does not check who is on the other end,
-                so someone on the path could read device data or impersonate the broker.
-              </p>
-            )}
+              <label className="console-toggle">
+                <input type="checkbox" checked={insecure} onChange={(event) => setInsecure(event.target.checked)} />
+                Accept any broker certificate
+              </label>
+              {insecure && (
+                <p className="form-note">
+                  <ShieldAlert size={13} /> This encrypts the traffic but does not check who is on the other end,
+                  so someone on the path could read device data or impersonate the broker.
+                </p>
+              )}
+            </div>
           </>
         ) : (
           <label>
@@ -368,10 +385,10 @@ function IntegrationEditor({ id, isNew, known, onClose, onCreated }: {
             <small className="field-hint">
               Each event is a JSON POST. When a signing secret is stored it arrives in the X-Fieldnode-Signature header as an HMAC of the body.
             </small>
+            {targetProblem && (
+              <span className={isBlockingProblem(targetProblem) ? 'form-error' : 'form-note'}>{targetProblem}</span>
+            )}
           </label>
-        )}
-        {kind === 'webhook' && targetProblem && (
-          <p className={isBlockingProblem(targetProblem) ? 'form-error' : 'form-note'}>{targetProblem}</p>
         )}
 
         <label>

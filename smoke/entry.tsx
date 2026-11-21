@@ -6,7 +6,7 @@ import { ActivityItem, DeviceHeader, DeviceTable, GatewayCard, PageHeadingAction
 import { DeviceConsole } from '../src/features/network/panels/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/panels/DeviceSettings'
 import { DeviceModels } from '../src/features/network/panels/DeviceModels'
-import { Integrations } from '../src/features/network/panels/Integrations'
+import { IntegrationEditor, Integrations } from '../src/features/network/panels/Integrations'
 import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/panels/Gateways'
 import { DecodeHealthPanel, NetworkServerPanel } from '../src/features/network/panels/NetworkHealth'
 import { attributeMap, attributeRows, describeDeviceEdit, diffDeviceEdit, locationFields, locationProblem } from '../src/features/network/control/device'
@@ -319,6 +319,30 @@ check('Integrations renders its heading', integrationsHtml, 'Event destinations'
 check('Integrations offers a new destination', integrationsHtml, 'New destination')
 assert('Integrations does not declare an empty set before the read',
   !integrationsHtml.includes('Nothing is being pushed out yet'))
+
+// The destination-type choice inside the add/edit form. These assert the shape
+// of the control rather than its pixels: a named group of native radios, both
+// options visible at once so they can be compared, and exactly one marked as
+// chosen. A restyle that keeps this shape stays honest; one that quietly turns
+// the pair into free text does not.
+const editorHtml = renderToString(h(IntegrationEditor, {
+  id: '', isNew: true, onClose: noop, onCreated: noop,
+}))
+check('the editor names the destination-type group', editorHtml, 'Destination type')
+check('the editor groups the options in a fieldset', editorHtml, '<fieldset')
+assert('both destination types are offered at once',
+  editorHtml.includes('MQTT broker') && editorHtml.includes('Webhook'))
+assert('the options are native radios sharing one group name',
+  editorHtml.includes('type="radio"') && editorHtml.includes('name="integration-kind"'))
+assert('exactly one option carries the selected style',
+  (editorHtml.match(/class="option is-selected"/g) ?? []).length === 1)
+assert('the other option is left unselected',
+  (editorHtml.match(/class="option"/g) ?? []).length === 1)
+assert('each option explains itself, so the two can be compared',
+  editorHtml.includes('The connection stays open') &&
+  editorHtml.includes('One JSON POST per event'))
+assert('the option text is not left as a bare caption under the control',
+  editorHtml.includes('<b>MQTT broker</b>'))
 
 assert('an empty destination id asks for one', integrationIdProblem('') !== '')
 assert('an upper-case destination id is refused', integrationIdProblem('Cloud-MQ') !== '')
