@@ -6,6 +6,7 @@ import { fetchUplinks, formatDecoded } from './control/traffic'
 import type { DeviceSession, UplinkRow } from './control/types'
 import type { Device } from './types'
 import { DeviceSettings } from './DeviceSettings'
+import { failureMessage, isServerUnavailable } from './control/http'
 
 /**
  * One device's live session, plus the controls that make it do something.
@@ -31,6 +32,15 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
 }) {
   const [session, setSession] = useState<DeviceSession | null>(null)
   const [loadError, setLoadError] = useState('')
+  /**
+   * Whether the failure means the network server could not be asked, as opposed
+   * to having been asked and answered "no session".
+   *
+   * These two used to render the same panel, which told an operator with a dead
+   * network server that their device had not joined — sending them to check the
+   * device while the actual problem was the process behind this page.
+   */
+  const [serverUnreachable, setServerUnreachable] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [payload, setPayload] = useState('')
@@ -44,11 +54,14 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
       const next = await fetchSession(device.eui)
       setSession(next)
       setLoadError('')
+      setServerUnreachable(false)
     } catch (error) {
-      // A device that has never joined legitimately has no session. Saying
-      // "no session yet" is more useful than a generic failure.
+      // A device that has never joined legitimately has no session, and that is
+      // a state of the device rather than a fault. Anything from 502 up is a
+      // fault of ours, and must not be described as one of theirs.
       setSession(null)
-      setLoadError(error instanceof Error ? error.message : 'Session unavailable')
+      setServerUnreachable(isServerUnavailable(error))
+      setLoadError(failureMessage(error, 'Session unavailable'))
     } finally {
       setLoading(false)
     }
@@ -81,7 +94,7 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
       void reload()
       onChanged()
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not queue the frame.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'Could not queue the frame.') })
     } finally {
       setSending(false)
     }
@@ -95,7 +108,7 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
       void reload()
       onChanged()
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not cancel.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'Could not cancel.') })
     }
   }
 
@@ -109,7 +122,7 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
       })
       onChanged()
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not schedule the report.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'Could not schedule the report.') })
     }
   }
 
@@ -126,7 +139,9 @@ export function DeviceConsole({ device, onClose, onChanged, onDeleted }: {
       {loading && <div className="console-loading">Reading the session…</div>}
       {!loading && loadError && !session && (
         <div className="console-empty">
-          <b>No session on this network yet</b>
+          <b>{serverUnreachable
+            ? 'The network server could not be reached'
+            : 'No session on this network yet'}</b>
           <span>{loadError}</span>
         </div>
       )}
@@ -302,7 +317,7 @@ function RecentReadings({ devEUI }: { devEUI: string }) {
       // note rather than a failure: everything else on this panel still works.
       setRows([])
       setState('error')
-      setProblem(error instanceof Error ? error.message : 'Uplink history is unavailable.')
+      setProblem(failureMessage(error, 'Uplink history is unavailable.'))
     }
   }, [devEUI])
 

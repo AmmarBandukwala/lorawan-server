@@ -4,6 +4,7 @@ import { attributeMap, attributeRows, deleteDevice, describeDeviceEdit, diffDevi
 import { fetchModels } from './control/models'
 import type { AttributeRow, DeviceEdit, DeviceModel, ProvisionedDevice } from './control/types'
 import type { Device } from './types'
+import { failureMessage } from './control/http'
 
 /**
  * The settings an operator can change on a device that is already provisioned.
@@ -72,7 +73,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setLoadError('')
     } catch (error) {
       setStored(null)
-      setLoadError(error instanceof Error ? error.message : 'Settings unavailable')
+      setLoadError(failureMessage(error, 'Settings unavailable'))
     }
   }, [device.eui])
 
@@ -145,7 +146,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       setFeedback({ kind: 'ok', text: describeDeviceEdit(edit) })
       onChanged()
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not save.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'Could not save.') })
     } finally {
       setSaving(false)
     }
@@ -158,7 +159,7 @@ export function DeviceSettings({ device, onChanged, onDeleted }: {
       await deleteDevice(device.eui)
       onDeleted()
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'Could not revoke.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'Could not revoke.') })
       setConfirmRevoke(false)
     } finally {
       setRevoking(false)

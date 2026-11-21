@@ -5,6 +5,7 @@ import type { DecodeTrial } from './control/models'
 import { formatDecoded } from './control/traffic'
 import type { DeviceModel, NetworkStatus } from './control/types'
 import { DecodeHealthPanel } from './NetworkHealth'
+import { failureMessage } from './control/http'
 
 /**
  * Device models: the sensor types on this network and how their bytes are read.
@@ -46,7 +47,7 @@ export function DeviceModels({ decoding }: { decoding?: NetworkStatus['decoding'
       // models, answers 503. Saying so beats an empty list that implies nobody has
       // created a model yet.
       setModels([])
-      setLoadError(error instanceof Error ? error.message : 'Device models are unavailable.')
+      setLoadError(failureMessage(error, 'Device models are unavailable.'))
     } finally {
       setLoaded(true)
     }
@@ -190,7 +191,7 @@ function ModelEditor({ modelId, isNew, onClose, onCreated }: {
       } catch (error) {
         if (!active) return
         setStored(null)
-        setLoadError(error instanceof Error ? error.message : 'This model could not be read.')
+        setLoadError(failureMessage(error, 'This model could not be read.'))
       }
     }, 0)
     return () => {
@@ -240,7 +241,7 @@ function ModelEditor({ modelId, isNew, onClose, onCreated }: {
         // The server's sentence is the useful one: for a bad formatter it names the
         // line and token, which is the difference between a two-minute fix and a
         // bug report about the console.
-        text: error instanceof Error ? error.message : 'The model could not be saved.',
+        text: failureMessage(error, 'The model could not be saved.'),
       })
     } finally {
       setSaving(false)
@@ -263,7 +264,7 @@ function ModelEditor({ modelId, isNew, onClose, onCreated }: {
       // Held briefly so the consequence is read before the panel closes.
       setTimeout(onClose, 1800)
     } catch (error) {
-      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : 'The model could not be deleted.' })
+      setFeedback({ kind: 'error', text: failureMessage(error, 'The model could not be deleted.') })
       setDeleting(false)
       setConfirmDelete(false)
     }
@@ -299,7 +300,7 @@ function ModelEditor({ modelId, isNew, onClose, onCreated }: {
       })
       setTrial(result)
     } catch (error) {
-      setTestProblem(error instanceof Error ? error.message : 'The test could not run.')
+      setTestProblem(failureMessage(error, 'The test could not run.'))
     } finally {
       setTesting(false)
     }
