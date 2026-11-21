@@ -177,18 +177,14 @@ func (r *Router) Names() []string {
 	return out
 }
 
-// The engine needs a Gateway when it is built, and the transport needs the
-// engine as its uplink handler, so one of the two must be wired in afterwards.
-// Wiring it through Lazy keeps that cycle out of both constructors and makes
-// the "no transport yet" case an explicit error instead of a nil dereference.
-// Lazy defers to a Gateway installed after construction.
+// Lazy defers to whichever transport is installed after construction.
 //
 // The engine needs a Gateway when it is built, and each transport needs the
 // engine as its uplink handler, so one of the two must be wired in afterwards.
-// Wiring it through Lazy keeps that cycle out of both constructors and makes the
-// "no transport yet" case an explicit error instead of a nil dereference. In
-// practice the value installed is a Router, so the engine sees one transmitter
-// however many protocols the deployment speaks.
+// Wiring it through Lazy keeps that cycle out of both constructors and makes
+// the "no transport yet" case an explicit error instead of a nil dereference.
+// In practice the value installed is a Router, so the engine sees one
+// transmitter however many protocols the deployment speaks.
 type Lazy struct {
 	mu sync.RWMutex
 	gw Gateway
