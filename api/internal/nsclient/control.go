@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 )
 
@@ -145,7 +146,7 @@ func (c *Client) Device(ctx context.Context, devEUI string) (json.RawMessage, er
 
 // ListModels returns every model without its formatter script.
 func (c *Client) ListModels(ctx context.Context) (json.RawMessage, error) {
-	return c.do(ctx, http.MethodGet, "/models", nil)
+	return c.do(ctx, http.MethodGet, nsModelRoute, nil)
 }
 
 // Model returns one model including its script.
@@ -181,11 +182,11 @@ func (c *Client) TestModelDecode(ctx context.Context, modelID string, body json.
 // Uplinks returns recent stored uplinks, decoded where the device's model has a
 // formatter. devEUI may be empty for the whole network.
 func (c *Client) Uplinks(ctx context.Context, devEUI string, limit int) (json.RawMessage, error) {
-	path := "/uplinks?limit=" + strconv.Itoa(limit)
+	query := url.Values{"limit": {strconv.Itoa(limit)}}
 	if devEUI != "" {
-		path += "&dev_eui=" + devEUI
+		query.Set("dev_eui", devEUI)
 	}
-	return c.do(ctx, http.MethodGet, path, nil)
+	return c.do(ctx, http.MethodGet, nsUplinkRoute+"?"+query.Encode(), nil)
 }
 
 // modelPath builds a model route. The slug is validated by the caller before it
@@ -193,7 +194,7 @@ func (c *Client) Uplinks(ctx context.Context, devEUI string, limit int) (json.Ra
 // in this service, and escaping it would hide that bug behind a 404 from the
 // network server.
 func modelPath(modelID string) string {
-	return "/models/" + modelID
+	return nsModelRoute + "/" + modelID
 }
 
 // do performs a request against the API base URL and returns the body verbatim.

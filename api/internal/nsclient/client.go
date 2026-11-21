@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,8 +24,15 @@ import (
 )
 
 const (
-	// nsDeviceRoute is the network server's device provisioning route prefix.
+	// The network server's route prefixes. These must match the routes it
+	// registers verbatim — see the mux in ns/cmd/ns/api.go. Getting one wrong is
+	// not a compile error and not a test failure either, because the two live in
+	// separate Go modules: it is a 404 from the network server's default mux,
+	// which the console then reports as a missing resource. nsclient_test.go
+	// pins each one against the path the request actually carries.
 	nsDeviceRoute = "/api/v1/devices"
+	nsModelRoute  = "/api/v1/models"
+	nsUplinkRoute = "/api/v1/uplinks"
 
 	// requestTimeout bounds one provisioning call. The network server may be
 	// starting alongside this process, so failing fast and letting the operator
@@ -156,7 +164,14 @@ func (c *Client) CreateDevice(ctx context.Context, d Device) (CreatedDevice, err
 }
 
 // PutDevice replaces an existing device.
+//
+// A missing DevEUI is refused here rather than sent: the collection route only
+// accepts POST, so an empty identifier would surface as a confusing 405 from the
+// network server instead of the caller error it is.
 func (c *Client) PutDevice(ctx context.Context, d Device) (CreatedDevice, error) {
+	if d.DevEUI == "" {
+		return CreatedDevice{}, errors.New("nsclient: PutDevice requires a DevEUI")
+	}
 	return c.send(ctx, http.MethodPut, devicePath(d.DevEUI), d)
 }
 
