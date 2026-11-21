@@ -111,6 +111,14 @@ export function endpointFor(transport: string, host: string, port?: string | num
 }
 
 /**
+ * Where the console's own API lives. Every route in the app is derived from this
+ * one constant — the snapshot reads in api/ and the control-plane calls in
+ * control/ — because nginx maps the prefix, the API serves it, and a change here
+ * has to be matched in both of those.
+ */
+export const API_PREFIX = '/api/v1'
+
+/**
  * Which views offer device registration as their primary action.
  *
  * This used to be an exclusion list — `view !== 'Settings' && view !== 'Models'`

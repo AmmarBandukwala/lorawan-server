@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ArrowUpRight, Check, CircleCheck, Copy, Info, RadioTower, ShieldAlert } from 'lucide-react'
 import { endpointFor, transportLabel } from './constants'
-import type { GatewayHealth, GatewayListener } from './control'
+import type { GatewayHealth, GatewayListener } from './control/types'
 
 /**
  * How to point a gateway at this server.

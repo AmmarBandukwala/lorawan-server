@@ -3,13 +3,14 @@ import {
   Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Braces, Check, ChevronDown,
   Menu, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
 } from 'lucide-react'
-import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/api'
+import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/snapshot'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, PageHeadingAction, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
 import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from './features/network/Gateways'
 import { DeviceModels } from './features/network/DeviceModels'
 import { NetworkServerPanel } from './features/network/NetworkHealth'
-import { fetchRegions, fetchStatus, gatewaySummary, type NetworkStatus, type RegionList } from './features/network/control'
+import { fetchRegions, fetchStatus, gatewaySummary } from './features/network/control/status'
+import type { NetworkStatus, RegionList } from './features/network/control/types'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
 import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, UNASSIGNED_GROUP } from './features/network/constants'
 import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type GroupFilter, type View } from './features/network/types'

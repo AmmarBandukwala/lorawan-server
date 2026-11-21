@@ -1,18 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Braces, CircleCheck, Plus, TriangleAlert, X } from 'lucide-react'
-import {
-  createModel,
-  deleteModel,
-  fetchModel,
-  fetchModels,
-  formatDecoded,
-  modelIdProblem,
-  testModelDecode,
-  updateModel,
-  type DecodeTrial,
-  type DeviceModel,
-  type NetworkStatus,
-} from './control'
+import { createModel, deleteModel, fetchModel, fetchModels, modelIdProblem, testModelDecode, updateModel } from './control/models'
+import type { DecodeTrial } from './control/models'
+import { formatDecoded } from './control/traffic'
+import type { DeviceModel, NetworkStatus } from './control/types'
 import { DecodeHealthPanel } from './NetworkHealth'
 
 /**

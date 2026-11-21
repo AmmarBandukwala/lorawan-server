@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, ShieldCheck, X } from 'lucide-react'
-import { registerDevice } from './api'
+import { registerDevice } from './snapshot'
 import { APP_KEY_HEX_DIGITS, EUI_HEX_DIGITS } from './constants'
 import { deviceFormError, deviceFormRequest, type DeviceFormValues } from './validation'
 import type { Device } from './types'

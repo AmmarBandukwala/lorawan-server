@@ -1,21 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Plus, ShieldOff, Trash2, X } from 'lucide-react'
-import {
-  attributeRows,
-  attributeMap,
-  deleteDevice,
-  describeDeviceEdit,
-  diffDeviceEdit,
-  editDevice,
-  fetchDevice,
-  fetchModels,
-  locationFields,
-  locationProblem,
-  type AttributeRow,
-  type DeviceEdit,
-  type DeviceModel,
-  type ProvisionedDevice,
-} from './control'
+import { attributeMap, attributeRows, deleteDevice, describeDeviceEdit, diffDeviceEdit, editDevice, fetchDevice, locationFields, locationProblem } from './control/device'
+import { fetchModels } from './control/models'
+import type { AttributeRow, DeviceEdit, DeviceModel, ProvisionedDevice } from './control/types'
 import type { Device } from './types'
 
 /**

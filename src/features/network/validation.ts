@@ -1,5 +1,5 @@
 import { APP_KEY_HEX_DIGITS, EUI_HEX_DIGITS, UNASSIGNED_GROUP } from './constants'
-import type { NewDevice } from './api'
+import type { NewDevice } from './snapshot'
 
 /** What the registration form collects, before any checking. */
 export type DeviceFormValues = {

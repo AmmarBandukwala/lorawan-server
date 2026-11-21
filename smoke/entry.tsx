@@ -8,13 +8,11 @@ import { DeviceSettings } from '../src/features/network/DeviceSettings'
 import { DeviceModels } from '../src/features/network/DeviceModels'
 import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/Gateways'
 import { DecodeHealthPanel, NetworkServerPanel } from '../src/features/network/NetworkHealth'
-import {
-  attributeMap, attributeRows, decodeHealth, describeDeviceEdit, diffDeviceEdit, formatDecoded,
-  formatUptime, gatewaySummary, locationFields, locationProblem, modelIdProblem,
-  recentlyRestarted,
-  type NetworkStatus,
-  type ProvisionedDevice,
-} from '../src/features/network/control'
+import { attributeMap, attributeRows, describeDeviceEdit, diffDeviceEdit, locationFields, locationProblem } from '../src/features/network/control/device'
+import { modelIdProblem } from '../src/features/network/control/models'
+import { decodeHealth, formatUptime, gatewaySummary, recentlyRestarted } from '../src/features/network/control/status'
+import { formatDecoded } from '../src/features/network/control/traffic'
+import type { NetworkStatus, ProvisionedDevice } from '../src/features/network/control/types'
 import { RegisterDeviceDialog } from '../src/features/network/RegisterDeviceDialog'
 import { DEVICE_FILTERS, endpointFor, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'

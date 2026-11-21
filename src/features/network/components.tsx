@@ -4,7 +4,7 @@ import {
   RadioTower, Search, TriangleAlert,
 } from 'lucide-react'
 import { DEVICE_FILTERS, LOW_BATTERY_PERCENT, SIGNAL_QUALITY, transportLabel, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from './constants'
-import type { GatewayHealth } from './control'
+import type { GatewayHealth } from './control/types'
 import type { Device, DeviceFilter, FacilitySettings, GatewayRecord, GroupFilter, NetworkEvent, View } from './types'
 
 /**
