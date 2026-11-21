@@ -620,6 +620,16 @@ const devicesHtml = renderToString(h(DevicesView, {
 check('the Devices view renders the table', devicesHtml, 'DEVICE')
 check('the Devices view renders the row it was given', devicesHtml, 'Tank 3')
 assert('an unselected device does not open a session panel', !devicesHtml.includes('Reading the session'))
+// The session column must not be reserved when no session is open: a second
+// grid track left declared keeps its width and its gap even with nothing
+// rendered into it, which stopped the inventory using the full width.
+assert('no session column is reserved while nothing is open', !devicesHtml.includes('with-console'))
+const devicesWithSessionHtml = renderToString(h(DevicesView, {
+  filteredDevices: [device], selected: device, setSelected: noop, refresh: noop,
+  view: 'Devices', setView: noop, ...controls,
+}))
+assert('the session column is reserved once one is open', devicesWithSessionHtml.includes('with-console'))
+assert('opening a session still renders the panel', devicesWithSessionHtml.includes('Reading the session'))
 
 const gatewaysHtml = renderToString(h(GatewaysView, {
   status: liveStatus, gateways: [gateway],

@@ -21,5 +21,5 @@ export function DevicesView({
   view: View
   setView: Navigate
 } & DeviceListControls) {
-  return <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refresh()} onDeleted={() => { setSelected(null); void refresh() }} />}</div>
+  return <div className={selected ? 'device-view with-console' : 'device-view'}><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refresh()} onDeleted={() => { setSelected(null); void refresh() }} />}</div>
 }

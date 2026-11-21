@@ -279,7 +279,12 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
  * Sized to sit beside the device table rather than over it, and the field grid
  * uses the same 9/11px scale as the gateway cards so a panel of raw protocol
  * values does not read as a different product. */
-.device-view { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 13px; align-items: start; margin-top: 20px; }
+.device-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 13px; align-items: start; margin-top: 20px; }
+/* The session column is declared only when a session is actually open. A
+ * second track left in the template would still reserve its width and its gap
+ * when nothing is rendered into it, which is what stopped the inventory from
+ * using the full width. */
+.device-view.with-console { grid-template-columns: minmax(0, 1fr) 320px; }
 .device-console { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 14px; padding: 18px; }
 .console-loading, .console-empty, .console-queue-empty { color: #87928a; font-size: 10px; }
 .console-empty { display: flex; flex-direction: column; gap: 4px; padding: 14px; border: 1px dashed var(--line); border-radius: 8px; }
@@ -410,7 +415,7 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .unheard-gateway small { margin-left: 7px; color: #96a09a; font-size: 9px; }
 
 @media (max-width: 1180px) {
-  .device-view { grid-template-columns: 1fr; }
+  .device-view.with-console { grid-template-columns: minmax(0, 1fr); }
   .device-console { position: static; }
 }
 
