@@ -128,7 +128,13 @@ export const API_PREFIX = '/api/v1'
  * this console at all, and the Events page offered it for no reason. An
  * exclusion list fails silently every time a view is added; naming the views
  * that have the action fails visibly.
+ *
+ * The Overview is excluded as well. Its device panel is a five-row preview with
+ * a "View all" route, so provisioning from there meant opening a form for a
+ * device you could not then see in context — the full inventory, the filters and
+ * the session console all live on the Devices page, which is where the action
+ * belongs.
  */
 export function viewOffersDeviceRegistration(view: View): boolean {
-  return view === 'Overview' || view === 'Devices'
+  return view === 'Devices'
 }

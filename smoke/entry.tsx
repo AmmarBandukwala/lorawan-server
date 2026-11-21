@@ -442,10 +442,13 @@ check('the counters say what they cover', cleanHtml, 'Only models that have sent
 // "Add device" used to render on every view except Settings and Models, so the
 // Gateways page offered a device form while its own first panel explains that
 // gateways are not registered here, and Events offered it for no reason at all.
+// It then stayed on the Overview, whose device panel is a five-row preview: the
+// form opened for a device you could not see in context, when the inventory,
+// filters and session console all live on the Devices page.
 // ---------------------------------------------------------------------------
 
-const deviceViews: View[] = ['Overview', 'Devices']
-const otherViews: View[] = ['Gateways', 'Events', 'Models', 'Settings']
+const deviceViews: View[] = ['Devices']
+const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Settings']
 for (const view of deviceViews) {
   assert(`the heading offers device registration on ${view}`, viewOffersDeviceRegistration(view))
 }
@@ -461,6 +464,10 @@ assert('the Events heading renders no primary action at all',
   renderToString(h(PageHeadingAction, {
     view: 'Events', canProvision: true, onAddDevice: noop,
   })) === '')
+assert('the Overview heading renders no primary action at all',
+  renderToString(h(PageHeadingAction, {
+    view: 'Overview', canProvision: true, onAddDevice: noop,
+  })) === '')
 const devicesHeading = renderToString(h(PageHeadingAction, {
   view: 'Devices', canProvision: true, onAddDevice: noop,
 }))
@@ -472,9 +479,11 @@ const offlineHeading = renderToString(h(PageHeadingAction, {
 }))
 assert('the action is disabled rather than hidden while the API is unreachable',
   offlineHeading.includes('Add device') && offlineHeading.includes('disabled'))
-// The Overview is what App renders first, so this checks the wiring rather than
-// only the component.
-check('the Overview page offers Add device', shell, 'Add device')
+// The Overview is what App renders first, so this checks the wiring end to end
+// rather than only the component in isolation.
+assert('the Overview page renders no Add device button', !shell.includes('Add device'))
+assert('the Overview still offers its route to the page that owns provisioning',
+  shell.includes('View all'))
 
 // The address a gateway is pointed at. One function builds it so the card and
 // the clipboard can never disagree.
