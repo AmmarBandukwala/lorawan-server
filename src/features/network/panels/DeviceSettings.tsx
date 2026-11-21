@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Plus, ShieldOff, Trash2, X } from 'lucide-react'
-import { attributeMap, attributeRows, deleteDevice, describeDeviceEdit, diffDeviceEdit, editDevice, fetchDevice, locationFields, locationProblem } from './control/device'
-import { fetchModels } from './control/models'
-import type { AttributeRow, DeviceEdit, DeviceModel, ProvisionedDevice } from './control/types'
-import type { Device } from './types'
-import { failureMessage } from './control/http'
+import { attributeMap, attributeRows, deleteDevice, describeDeviceEdit, diffDeviceEdit, editDevice, fetchDevice, locationFields, locationProblem } from '../control/device'
+import { fetchModels } from '../control/models'
+import type { AttributeRow, DeviceEdit, DeviceModel, ProvisionedDevice } from '../control/types'
+import type { Device } from '../types'
+import { failureMessage } from '../control/http'
 
 /**
  * The settings an operator can change on a device that is already provisioned.

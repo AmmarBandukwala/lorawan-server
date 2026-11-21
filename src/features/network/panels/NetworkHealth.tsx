@@ -1,8 +1,8 @@
 import { Cpu, RadioTower, Timer } from 'lucide-react'
-import { decodeHealth, formatUptime, gatewaySummary, recentlyRestarted } from './control/status'
-import type { GatewaySummary } from './control/status'
-import type { NetworkStatus } from './control/types'
-import { transportLabel } from './constants'
+import { decodeHealth, formatUptime, gatewaySummary, recentlyRestarted } from '../control/status'
+import type { GatewaySummary } from '../control/status'
+import type { NetworkStatus } from '../control/types'
+import { transportLabel } from '../constants'
 
 /**
  * Network-server identity and liveness.

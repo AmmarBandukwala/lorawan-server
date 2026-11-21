@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { Plus, ShieldCheck, X } from 'lucide-react'
-import { registerDevice } from './snapshot'
-import { APP_KEY_HEX_DIGITS, EUI_HEX_DIGITS } from './constants'
-import { deviceFormError, deviceFormRequest, type DeviceFormValues } from './validation'
-import type { Device } from './types'
-import { failureMessage } from './control/http'
+import { registerDevice } from '../snapshot'
+import { APP_KEY_HEX_DIGITS, EUI_HEX_DIGITS } from '../constants'
+import { deviceFormError, deviceFormRequest, type DeviceFormValues } from '../validation'
+import type { Device } from '../types'
+import { failureMessage } from '../control/http'
 
 const emptyForm: DeviceFormValues = { name: '', devEui: '', joinEui: '', appKey: '', group: '' }
 

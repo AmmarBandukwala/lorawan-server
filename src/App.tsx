@@ -3,8 +3,8 @@ import {
   Activity, Bell, Boxes, Braces, ChevronDown, Menu, Radio, RadioTower, RefreshCw, Settings2,
 } from 'lucide-react'
 import { PageHeadingAction, SettingsForm } from './features/network/components'
-import { DeviceModels } from './features/network/DeviceModels'
-import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
+import { DeviceModels } from './features/network/panels/DeviceModels'
+import { RegisterDeviceDialog } from './features/network/panels/RegisterDeviceDialog'
 import { gatewaySummary } from './features/network/control/status'
 import { UNASSIGNED_GROUP } from './features/network/constants'
 import type { Device, DeviceFilter, GroupFilter, View } from './features/network/types'

@@ -9,7 +9,7 @@
 import { ArrowDown, ArrowUpRight, Boxes, Check, RadioTower, TriangleAlert } from 'lucide-react'
 
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway } from '../components'
-import { NetworkServerPanel } from '../NetworkHealth'
+import { NetworkServerPanel } from '../panels/NetworkHealth'
 import { type GatewaySummary } from '../control/status'
 import type { NetworkStatus } from '../control/types'
 import type { Device, GatewayRecord, NetworkEvent, Overview, View } from '../types'

@@ -3,7 +3,7 @@
  * session openable from the row.
  */
 import { DeviceHeader, DeviceTable } from '../components'
-import { DeviceConsole } from '../DeviceConsole'
+import { DeviceConsole } from '../panels/DeviceConsole'
 import type { Device, View } from '../types'
 import type { DeviceListControls, Navigate } from './shared'
 

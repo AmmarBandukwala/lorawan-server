@@ -8,8 +8,8 @@
  * own section rather than a misleading row.
  */
 import { GatewayCard } from '../components'
-import { DutyCyclePanel } from '../DeviceConsole'
-import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from '../Gateways'
+import { DutyCyclePanel } from '../panels/DeviceConsole'
+import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from '../panels/Gateways'
 import type { NetworkStatus } from '../control/types'
 import type { GatewayRecord } from '../types'
 

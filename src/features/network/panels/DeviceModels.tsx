@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Braces, CircleCheck, Plus, TriangleAlert, X } from 'lucide-react'
-import { createModel, deleteModel, fetchModel, fetchModels, modelIdProblem, testModelDecode, updateModel } from './control/models'
-import type { DecodeTrial } from './control/models'
-import { formatDecoded } from './control/traffic'
-import type { DeviceModel, NetworkStatus } from './control/types'
+import { createModel, deleteModel, fetchModel, fetchModels, modelIdProblem, testModelDecode, updateModel } from '../control/models'
+import type { DecodeTrial } from '../control/models'
+import { formatDecoded } from '../control/traffic'
+import type { DeviceModel, NetworkStatus } from '../control/types'
 import { DecodeHealthPanel } from './NetworkHealth'
-import { failureMessage } from './control/http'
+import { failureMessage } from '../control/http'
 
 /**
  * Device models: the sensor types on this network and how their bytes are read.

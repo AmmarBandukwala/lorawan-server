@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Battery, Check, RefreshCw, Send, Trash2, X, Zap } from 'lucide-react'
-import { cancelDownlink, enqueueDownlink, fetchSession, requestDeviceStatus, validatePayload } from './control/session'
-import { batteryPercent } from './control/status'
-import { fetchUplinks, formatDecoded } from './control/traffic'
-import type { DeviceSession, UplinkRow } from './control/types'
-import type { Device } from './types'
+import { cancelDownlink, enqueueDownlink, fetchSession, requestDeviceStatus, validatePayload } from '../control/session'
+import { batteryPercent } from '../control/status'
+import { fetchUplinks, formatDecoded } from '../control/traffic'
+import type { DeviceSession, UplinkRow } from '../control/types'
+import type { Device } from '../types'
 import { DeviceSettings } from './DeviceSettings'
-import { failureMessage, isServerUnavailable } from './control/http'
+import { failureMessage, isServerUnavailable } from '../control/http'
 
 /**
  * One device's live session, plus the controls that make it do something.
