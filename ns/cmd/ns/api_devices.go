@@ -57,26 +57,26 @@ type deviceView struct {
 	Location   *engine.Location  `json:"location,omitempty"`
 }
 
-func newDeviceView(d *engine.Device) deviceView {
+func newDeviceView(device *engine.Device) deviceView {
 	v := deviceView{
-		DevEUI:      d.DevEUI.String(),
-		JoinEUI:     d.JoinEUI.String(),
-		Name:        d.Name,
-		Enabled:     d.Enabled,
+		DevEUI:      device.DevEUI.String(),
+		JoinEUI:     device.JoinEUI.String(),
+		Name:        device.Name,
+		Enabled:     device.Enabled,
 		Activation:  "otaa",
-		Group:       d.Group,
-		ModelID:     d.ModelID,
-		DisableADR:  d.DisableADR,
-		SupportsC:   d.SupportsClassC,
-		MaxDataRate: d.MaxDataRate,
-		MinDataRate: d.MinDataRate,
-		MaxTxPower:  d.MaxTxPower,
-		Attributes:  d.Attributes,
-		Location:    d.Location,
+		Group:       device.Group,
+		ModelID:     device.ModelID,
+		DisableADR:  device.DisableADR,
+		SupportsC:   device.SupportsClassC,
+		MaxDataRate: device.MaxDataRate,
+		MinDataRate: device.MinDataRate,
+		MaxTxPower:  device.MaxTxPower,
+		Attributes:  device.Attributes,
+		Location:    device.Location,
 	}
-	if !d.OTAA {
+	if !device.OTAA {
 		v.Activation = "abp"
-		v.DevAddr = d.DevAddr.String()
+		v.DevAddr = device.DevAddr.String()
 	}
 	return v
 }

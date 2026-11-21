@@ -57,22 +57,22 @@ type modelView struct {
 	UpdatedAt    string `json:"updated_at,omitempty"`
 }
 
-func newModelView(m *engine.DeviceModel, withScript bool) modelView {
+func newModelView(model *engine.DeviceModel, withScript bool) modelView {
 	v := modelView{
-		ModelID:      m.ModelID,
-		Name:         m.Name,
-		Description:  m.Description,
-		CodecKind:    m.CodecKind,
-		CodecPresent: m.CodecKind == string(codec.KindJS) && m.CodecScript != "",
+		ModelID:      model.ModelID,
+		Name:         model.Name,
+		Description:  model.Description,
+		CodecKind:    model.CodecKind,
+		CodecPresent: model.CodecKind == string(codec.KindJS) && model.CodecScript != "",
 	}
 	if withScript {
-		v.CodecScript = m.CodecScript
+		v.CodecScript = model.CodecScript
 	}
-	if !m.CreatedAt.IsZero() {
-		v.CreatedAt = m.CreatedAt.UTC().Format(time.RFC3339)
+	if !model.CreatedAt.IsZero() {
+		v.CreatedAt = model.CreatedAt.UTC().Format(time.RFC3339)
 	}
-	if !m.UpdatedAt.IsZero() {
-		v.UpdatedAt = m.UpdatedAt.UTC().Format(time.RFC3339)
+	if !model.UpdatedAt.IsZero() {
+		v.UpdatedAt = model.UpdatedAt.UTC().Format(time.RFC3339)
 	}
 	return v
 }

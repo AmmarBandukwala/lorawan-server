@@ -99,25 +99,25 @@ func marshalJoinAcceptBody(pl JoinAcceptPayload) ([]byte, error) {
 	return out, nil
 }
 
-func parseJoinAcceptBody(b []byte) (*JoinAcceptPayload, error) {
-	if len(b) != 12 && len(b) != 28 {
-		return nil, fmt.Errorf("join-accept body must be 12 or 28 bytes, got %d", len(b))
+func parseJoinAcceptBody(body []byte) (*JoinAcceptPayload, error) {
+	if len(body) != 12 && len(body) != 28 {
+		return nil, fmt.Errorf("join-accept body must be 12 or 28 bytes, got %d", len(body))
 	}
 	pl := &JoinAcceptPayload{
-		JoinNonce: uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16,
-		NetID:     NetID{b[5], b[4], b[3]}, // wire order is little-endian
-		RxDelay:   b[11],
+		JoinNonce: uint32(body[0]) | uint32(body[1])<<8 | uint32(body[2])<<16,
+		NetID:     NetID{body[5], body[4], body[3]}, // wire order is little-endian
+		RxDelay:   body[11],
 	}
-	devAddr, err := DevAddrFromBytesLE(b[6:10])
+	devAddr, err := DevAddrFromBytesLE(body[6:10])
 	if err != nil {
 		return nil, err
 	}
 	pl.DevAddr = devAddr
-	pl.DLSettings = parseDLSettings(b[10])
-	if len(b) == 28 {
-		cf := &CFList{Type: b[27]}
+	pl.DLSettings = parseDLSettings(body[10])
+	if len(body) == 28 {
+		cf := &CFList{Type: body[27]}
 		for i := range 5 {
-			f, err := DecodeFrequency(b[12+i*3 : 15+i*3])
+			f, err := DecodeFrequency(body[12+i*3 : 15+i*3])
 			if err != nil {
 				return nil, fmt.Errorf("CFList: %w", err)
 			}

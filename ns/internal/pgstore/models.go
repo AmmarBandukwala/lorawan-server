@@ -49,11 +49,11 @@ func (s *Store) ModelByID(ctx context.Context, modelID string) (*engine.DeviceMo
 }
 
 // SaveModel implements engine.ModelRepo, inserting or updating by model ID.
-func (s *Store) SaveModel(ctx context.Context, m *engine.DeviceModel) error {
-	if m == nil || m.ModelID == "" {
+func (s *Store) SaveModel(ctx context.Context, model *engine.DeviceModel) error {
+	if model == nil || model.ModelID == "" {
 		return errors.New("pgstore: model has no model_id")
 	}
-	if m.CodecKind == "JS" && m.CodecScript == "" {
+	if model.CodecKind == "JS" && model.CodecScript == "" {
 		return errors.New("pgstore: a JS model needs a payload formatter")
 	}
 	_, err := s.pool.Exec(ctx, `
@@ -65,9 +65,9 @@ func (s *Store) SaveModel(ctx context.Context, m *engine.DeviceModel) error {
 			codec_kind   = EXCLUDED.codec_kind,
 			codec_script = EXCLUDED.codec_script,
 			updated_at   = now()`,
-		m.ModelID, m.Name, m.Description, m.CodecKind, m.CodecScript)
+		model.ModelID, model.Name, model.Description, model.CodecKind, model.CodecScript)
 	if err != nil {
-		return fmt.Errorf("pgstore: save model %s: %w", m.ModelID, err)
+		return fmt.Errorf("pgstore: save model %s: %w", model.ModelID, err)
 	}
 	return nil
 }
@@ -105,14 +105,14 @@ type modelRow interface {
 }
 
 func scanModel(row modelRow) (*engine.DeviceModel, error) {
-	var m engine.DeviceModel
-	err := row.Scan(&m.ModelID, &m.Name, &m.Description, &m.CodecKind, &m.CodecScript,
-		&m.CreatedAt, &m.UpdatedAt)
+	var model engine.DeviceModel
+	err := row.Scan(&model.ModelID, &model.Name, &model.Description, &model.CodecKind, &model.CodecScript,
+		&model.CreatedAt, &model.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, engine.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("pgstore: scan model: %w", err)
 	}
-	return &m, nil
+	return &model, nil
 }

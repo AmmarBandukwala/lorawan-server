@@ -18,15 +18,15 @@ func mustRegion(t *testing.T, name string) region.Region {
 
 func TestEU868(t *testing.T) {
 	r := mustRegion(t, "EU868")
-	d := r.Defaults()
-	if d.RX2FrequencyHz != 869_525_000 || d.RX2DataRate != 0 {
-		t.Errorf("RX2 = %d Hz DR%d, want 869525000 Hz DR0", d.RX2FrequencyHz, d.RX2DataRate)
+	defaults := r.Defaults()
+	if defaults.RX2FrequencyHz != 869_525_000 || defaults.RX2DataRate != 0 {
+		t.Errorf("RX2 = %d Hz DR%d, want 869525000 Hz DR0", defaults.RX2FrequencyHz, defaults.RX2DataRate)
 	}
-	if d.RX1Delay != time.Second || d.RX2Delay != 2*time.Second {
-		t.Errorf("delays = %v/%v, want 1s/2s", d.RX1Delay, d.RX2Delay)
+	if defaults.RX1Delay != time.Second || defaults.RX2Delay != 2*time.Second {
+		t.Errorf("delays = %v/%v, want 1s/2s", defaults.RX1Delay, defaults.RX2Delay)
 	}
-	if d.JoinAcceptDelay1 != 5*time.Second || d.JoinAcceptDelay2 != 6*time.Second {
-		t.Errorf("join-accept delays = %v/%v, want 5s/6s", d.JoinAcceptDelay1, d.JoinAcceptDelay2)
+	if defaults.JoinAcceptDelay1 != 5*time.Second || defaults.JoinAcceptDelay2 != 6*time.Second {
+		t.Errorf("join-accept delays = %v/%v, want 5s/6s", defaults.JoinAcceptDelay1, defaults.JoinAcceptDelay2)
 	}
 
 	cases := []struct{ upDR, offset, want int }{

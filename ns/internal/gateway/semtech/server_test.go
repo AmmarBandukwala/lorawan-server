@@ -252,12 +252,12 @@ func TestMalformedDatagramIsIgnoredWithoutPanic(t *testing.T) {
 	// or the forwarder retries the batch forever.
 	gw := newFakeGateway(t, srv.ListenAddr())
 	seq := gw.send(PushData, `{"rxpk":[`)
-	if h, _ := gw.read(); h.Type != PushAck || h.Sequence != seq {
-		t.Fatalf("a PUSH_DATA with a broken body was not acknowledged: %s seq %d", h.Type, h.Sequence)
+	if header, _ := gw.read(); header.Type != PushAck || header.Sequence != seq {
+		t.Fatalf("a PUSH_DATA with a broken body was not acknowledged: %s seq %d", header.Type, header.Sequence)
 	}
 	// And the server must still be serving.
 	seq = gw.send(PullData, "")
-	if h, _ := gw.read(); h.Type != PullAck || h.Sequence != seq {
-		t.Fatalf("the server stopped answering: got %s seq %d", h.Type, h.Sequence)
+	if header, _ := gw.read(); header.Type != PullAck || header.Sequence != seq {
+		t.Fatalf("the server stopped answering: got %s seq %d", header.Type, header.Sequence)
 	}
 }

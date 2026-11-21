@@ -64,26 +64,26 @@ func (f FHDR) marshal() ([]byte, error) {
 	return out, nil
 }
 
-func parseFHDR(b []byte) (FHDR, int, error) {
-	var f FHDR
-	if len(b) < 7 {
-		return f, 0, fmt.Errorf("FHDR needs at least 7 bytes, got %d", len(b))
+func parseFHDR(raw []byte) (FHDR, int, error) {
+	var hdr FHDR
+	if len(raw) < 7 {
+		return hdr, 0, fmt.Errorf("FHDR needs at least 7 bytes, got %d", len(raw))
 	}
-	devAddr, err := DevAddrFromBytesLE(b[0:4])
+	devAddr, err := DevAddrFromBytesLE(raw[0:4])
 	if err != nil {
-		return f, 0, err
+		return hdr, 0, err
 	}
-	f.DevAddr = devAddr
-	f.FCtrl = parseFCtrl(b[4])
-	f.FCnt = uint16(b[5]) | uint16(b[6])<<8
-	n := 7 + int(f.FCtrl.FOptsLen)
-	if len(b) < n {
-		return f, 0, fmt.Errorf("FHDR truncated: need %d bytes, got %d", n, len(b))
+	hdr.DevAddr = devAddr
+	hdr.FCtrl = parseFCtrl(raw[4])
+	hdr.FCnt = uint16(raw[5]) | uint16(raw[6])<<8
+	n := 7 + int(hdr.FCtrl.FOptsLen)
+	if len(raw) < n {
+		return hdr, 0, fmt.Errorf("FHDR truncated: need %d bytes, got %d", n, len(raw))
 	}
-	if f.FCtrl.FOptsLen > 0 {
-		f.FOpts = append([]byte(nil), b[7:n]...)
+	if hdr.FCtrl.FOptsLen > 0 {
+		hdr.FOpts = append([]byte(nil), raw[7:n]...)
 	}
-	return f, n, nil
+	return hdr, n, nil
 }
 
 // DLSettings is the join-accept downlink settings field

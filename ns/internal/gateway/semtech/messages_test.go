@@ -284,14 +284,14 @@ func TestParseTxAck(t *testing.T) {
 // TestStationStatsTags guards the struct tags against typos: a wrong tag
 // silently reports every gateway as having zero traffic.
 func TestStationStatsTags(t *testing.T) {
-	var s StationStats
+	var stats StationStats
 	if err := json.Unmarshal([]byte(`{"time":"t","lati":1.5,"long":2.5,"alti":9,`+
-		`"rxnb":7,"rxok":6,"rxfw":1,"mailf":0.5,"txnb":4}`), &s); err != nil {
+		`"rxnb":7,"rxok":6,"rxfw":1,"mailf":0.5,"txnb":4}`), &stats); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if s.Latitude != 1.5 || s.Longitude != 2.5 || s.Altitude != 9 ||
-		s.RxReceived != 7 || s.RxOK != 6 || s.RxFocus != 1 ||
-		s.MailboxTime != 0.5 || s.TxReceived != 4 {
-		t.Errorf("stats = %+v", s)
+	if stats.Latitude != 1.5 || stats.Longitude != 2.5 || stats.Altitude != 9 ||
+		stats.RxReceived != 7 || stats.RxOK != 6 || stats.RxFocus != 1 ||
+		stats.MailboxTime != 0.5 || stats.TxReceived != 4 {
+		t.Errorf("stats = %+v", stats)
 	}
 }

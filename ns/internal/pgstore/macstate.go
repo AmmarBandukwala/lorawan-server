@@ -83,23 +83,23 @@ func decodeMACState(raw []byte, session *engine.Session) error {
 	if len(raw) == 0 {
 		return nil
 	}
-	var m macState
-	if err := json.Unmarshal(raw, &m); err != nil {
+	var state macState
+	if err := json.Unmarshal(raw, &state); err != nil {
 		return fmt.Errorf("pgstore: decode mac_state: %w", err)
 	}
-	session.UplinkHistory = m.UplinkHistory
-	session.ChannelMask = m.ChannelMask
-	session.UserChannels = m.UserChannels
-	session.ADRAckCnt = m.ADRAckCnt
-	session.LinkADRRetries = m.LinkADRRetries
-	session.LastADRBit = m.LastADRBit
-	session.DutyCycle = m.DutyCycle
-	session.MaxEIRPIndex = m.MaxEIRPIndex
-	session.UplinkDwell400 = m.UplinkDwell400
-	session.DownlinkDwell400 = m.DownlinkDwell400
-	session.PendingDutyCycle = m.PendingDutyCycle
-	session.PendingTXParams = m.PendingTXParams
-	session.PendingRX1Delay = m.PendingRX1Delay
-	session.PendingChannel = m.PendingChannel
+	session.UplinkHistory = state.UplinkHistory
+	session.ChannelMask = state.ChannelMask
+	session.UserChannels = state.UserChannels
+	session.ADRAckCnt = state.ADRAckCnt
+	session.LinkADRRetries = state.LinkADRRetries
+	session.LastADRBit = state.LastADRBit
+	session.DutyCycle = state.DutyCycle
+	session.MaxEIRPIndex = state.MaxEIRPIndex
+	session.UplinkDwell400 = state.UplinkDwell400
+	session.DownlinkDwell400 = state.DownlinkDwell400
+	session.PendingDutyCycle = state.PendingDutyCycle
+	session.PendingTXParams = state.PendingTXParams
+	session.PendingRX1Delay = state.PendingRX1Delay
+	session.PendingChannel = state.PendingChannel
 	return nil
 }

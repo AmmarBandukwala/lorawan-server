@@ -83,16 +83,16 @@ func (p *PHYPayload) ValidateDataMIC(dir byte, fCnt uint32, nwkSKey AES128Key) (
 // dataB0 builds the 16-byte B0 CMAC initialization block:
 // 0x49 | 0x00*4 | Dir | DevAddr(LE4) | FCnt(LE4) | 0x00 | msglen.
 func dataB0(dir byte, devAddr DevAddr, fCnt, msgLen uint32) [16]byte {
-	var b [16]byte
-	b[0] = 0x49
-	b[5] = dir
-	copy(b[6:10], devAddr.BytesLE())
-	b[10] = byte(fCnt)
-	b[11] = byte(fCnt >> 8)
-	b[12] = byte(fCnt >> 16)
-	b[13] = byte(fCnt >> 24)
-	b[15] = byte(msgLen)
-	return b
+	var block [16]byte
+	block[0] = 0x49
+	block[5] = dir
+	copy(block[6:10], devAddr.BytesLE())
+	block[10] = byte(fCnt)
+	block[11] = byte(fCnt >> 8)
+	block[12] = byte(fCnt >> 16)
+	block[13] = byte(fCnt >> 24)
+	block[15] = byte(msgLen)
+	return block
 }
 
 // --- FRMPayload encryption (RFC4493-style counter mode, LoRaWAN §4.2.3) ---
@@ -131,16 +131,16 @@ func (p *PHYPayload) DecryptFOpts(key AES128Key, dir byte, fCnt uint32) error {
 func keystreamXOR(key AES128Key, devAddr DevAddr, dir byte, fCnt uint32, buf []byte) {
 	n := len(buf)
 	for i := 1; (i-1)*16 < n; i++ {
-		var a [16]byte
-		a[0] = 0x01
-		a[5] = dir
-		copy(a[6:10], devAddr.BytesLE())
-		a[10] = byte(fCnt)
-		a[11] = byte(fCnt >> 8)
-		a[12] = byte(fCnt >> 16)
-		a[13] = byte(fCnt >> 24)
-		a[15] = byte(i)
-		s := key.EncryptBlock(a)
+		var input [16]byte
+		input[0] = 0x01
+		input[5] = dir
+		copy(input[6:10], devAddr.BytesLE())
+		input[10] = byte(fCnt)
+		input[11] = byte(fCnt >> 8)
+		input[12] = byte(fCnt >> 16)
+		input[13] = byte(fCnt >> 24)
+		input[15] = byte(i)
+		s := key.EncryptBlock(input)
 		for j := 0; j < 16 && (i-1)*16+j < n; j++ {
 			buf[(i-1)*16+j] ^= s[j]
 		}

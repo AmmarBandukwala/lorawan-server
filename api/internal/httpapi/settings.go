@@ -164,13 +164,13 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 // the caller decides where it came from — the network server when reachable, the
 // compiled-in fallback otherwise — and this stays a pure function.
 func validateFacilitySettings(settings domain.FacilitySettings, regions []string) string {
-	if n := utf8.RuneCountInString(settings.FacilityName); n == 0 || n > MaxNameLen {
+	if length := utf8.RuneCountInString(settings.FacilityName); length == 0 || length > MaxNameLen {
 		return ErrInvalidSettings
 	}
-	if n := utf8.RuneCountInString(settings.OperatorName); n == 0 || n > MaxOperatorNameLen {
+	if length := utf8.RuneCountInString(settings.OperatorName); length == 0 || length > MaxOperatorNameLen {
 		return ErrInvalidSettings
 	}
-	if n := utf8.RuneCountInString(settings.OperatorRole); n == 0 || n > MaxOperatorRoleLen {
+	if length := utf8.RuneCountInString(settings.OperatorRole); length == 0 || length > MaxOperatorRoleLen {
 		return ErrInvalidSettings
 	}
 	for _, r := range regions {

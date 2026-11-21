@@ -17,15 +17,15 @@ func DeriveSessionKey(appKey AES128Key, typ byte, joinNonce uint32, netID NetID,
 	if joinNonce > MaxJoinNonce {
 		return AES128Key{}, fmt.Errorf("joinNonce %d exceeds 24 bits", joinNonce)
 	}
-	var b [16]byte
-	b[0] = typ
-	b[1] = byte(joinNonce)
-	b[2] = byte(joinNonce >> 8)
-	b[3] = byte(joinNonce >> 16)
-	copy(b[4:7], netID.BytesLE())
-	b[7] = byte(devNonce)
-	b[8] = byte(devNonce >> 8)
-	return appKey.EncryptBlock(b), nil
+	var block [16]byte
+	block[0] = typ
+	block[1] = byte(joinNonce)
+	block[2] = byte(joinNonce >> 8)
+	block[3] = byte(joinNonce >> 16)
+	copy(block[4:7], netID.BytesLE())
+	block[7] = byte(devNonce)
+	block[8] = byte(devNonce >> 8)
+	return appKey.EncryptBlock(block), nil
 }
 
 // DeriveNwkSKey derives the network session integrity key (NwkSKey).
