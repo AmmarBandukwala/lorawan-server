@@ -390,3 +390,77 @@ export type UplinkRow = {
    */
   has_codec: boolean
 }
+
+/**
+ * Integration destinations: where a decoded event is pushed as it arrives.
+ *
+ * There is deliberately no credential field in any of these types. The network
+ * server accepts a secret on write and never returns one, so the console cannot
+ * display it and a field for it would only ever hold something the operator just
+ * typed. `has_secret` is the honest substitute: it says a credential exists
+ * without being one.
+ */
+export type IntegrationKind = 'webhook' | 'mqtt'
+
+export type WebhookSettings = {
+  url: string
+}
+
+export type MQTTSettings = {
+  broker_url: string
+  topic?: string
+  client_id?: string
+  username?: string
+  qos?: number
+  retain?: boolean
+  /** Encrypted but unauthenticated. The panel has to say so out loud. */
+  insecure_skip_verify?: boolean
+}
+
+export type Integration = {
+  id: string
+  kind: IntegrationKind
+  name: string
+  enabled: boolean
+  webhook: WebhookSettings
+  mqtt: MQTTSettings
+  has_secret: boolean
+
+  /**
+   * Whether the running process currently has a live connection to this
+   * destination. It is what separates "I saved it" from "it is delivering", and
+   * only an MQTT destination can truly answer: a webhook has no persistent
+   * connection, so false there means "not applicable", not "broken".
+   */
+  connected: boolean
+  delivery_error?: string
+
+  /**
+   * True for a destination configured through the network server's environment,
+   * which has no row behind it. Shown so the page accounts for everything that
+   * is delivering, and read-only because there is nothing here to edit.
+   */
+  managed_by_environment: boolean
+}
+
+/** What the operator fills in. `secret` absent means "leave it as it is". */
+export type IntegrationInput = {
+  id: string
+  kind: IntegrationKind
+  name: string
+  enabled: boolean
+  webhook: WebhookSettings
+  mqtt: MQTTSettings
+  /**
+   * undefined: do not touch the stored credential. '': remove it. Anything else:
+   * set it. A plain string cannot tell those three apart, which is why this is
+   * optional rather than defaulted to empty.
+   */
+  secret?: string
+}
+
+/** The verdict of the "test" button. */
+export type IntegrationProbe = {
+  ok: boolean
+  detail: string
+}

@@ -106,6 +106,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/models/{model_id}", s.updateModel)
 	mux.HandleFunc("DELETE /api/v1/models/{model_id}", s.deleteModel)
 	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", s.testModelDecode)
+
+	// Integration destinations, relayed to the network server. The id travels in
+	// the body on create, matching the network server's own shape.
+	mux.HandleFunc("GET /api/v1/integrations", s.listIntegrations)
+	mux.HandleFunc("POST /api/v1/integrations", s.createIntegration)
+	mux.HandleFunc("GET /api/v1/integrations/{id}", s.getIntegration)
+	mux.HandleFunc("PUT /api/v1/integrations/{id}", s.updateIntegration)
+	mux.HandleFunc("DELETE /api/v1/integrations/{id}", s.deleteIntegration)
+	mux.HandleFunc("POST /api/v1/integrations/{id}/test", s.testIntegration)
 	mux.HandleFunc("GET /api/v1/uplinks", s.listUplinks)
 	return withSecurityHeaders(mux)
 }

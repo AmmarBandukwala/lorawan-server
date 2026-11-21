@@ -410,6 +410,13 @@ func (d *Dispatcher) run(ctx context.Context, j job) {
 	d.deliver(ctx, j.ev)
 }
 
+// deliver hands the event to every configured destination.
+//
+// published counts events a sink accepted, and it is incremented after Publish
+// returns — so the counter trails what a receiver already observed. A test that
+// watches an endpoint and then reads the counters will see the event at the
+// endpoint first. That ordering is the honest one: an event is delivered when
+// the sink says so, not when the request begins.
 func (d *Dispatcher) deliver(ctx context.Context, ev Event) {
 	for _, s := range d.currentSinks() {
 		if err := s.Publish(ctx, ev); err != nil {

@@ -84,7 +84,7 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 		engCfg.AggregationDelay = cfg.aggregationDelay
 	}
 
-	store, gatewayStore, closeStore, err := openStore(ctx, log, cfg.databaseURL)
+	store, gatewayStore, integrationStore, closeStore, err := openStore(ctx, log, cfg.databaseURL)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 	// Integrations wrap the store rather than replacing it: the dispatcher is the
 	// Recorder the engine sees, and it writes through before fanning out. With no
 	// endpoints configured this is a pass-through that costs nothing.
-	recorder, integrations, closeIntegrations, err := newRecorder(store, cfg, log)
+	recorder, integrations, supervisor, closeIntegrations, err := newRecorder(store, integrationStore, cfg, log)
 	if err != nil {
 		return err
 	}
@@ -228,6 +228,15 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 		if integrations != nil {
 			api.invalidate = integrations.InvalidateDecoder
 		}
+		// Integration CRUD needs both halves: somewhere to keep a destination and
+		// something to apply it to the live sinks. Without a store the endpoints
+		// answer 503, which is honest, rather than accepting a write that a
+		// restart would forget.
+		if integrationStore != nil && supervisor != nil {
+			api.integrations = integrationStore
+			api.reloadIntegrations = supervisor
+			api.environmentSinkNames = supervisor.EnvironmentSinks()
+		}
 		if err := api.Start(); err != nil {
 			_ = srv.Close()
 			if station != nil {
@@ -291,14 +300,24 @@ func run(ctx context.Context, log *slog.Logger, cfg config) error {
 // With neither webhook endpoints nor device models it returns the store
 // untouched, so a deployment that uses neither pays nothing: no goroutine, no
 // channel, no indirection on the radio path.
-func newRecorder(store engine.Store, cfg config, log *slog.Logger) (
-	engine.Store, *integration.Dispatcher, func(), error) {
+// newRecorder wraps the store's recorder with the integration dispatcher.
+//
+// With no webhook endpoints, no device models and nowhere to store destinations
+// it returns the store untouched, so a deployment that uses none of them pays
+// nothing: no goroutine, no channel, no indirection on the radio path.
+//
+// A PostgreSQL store changes that test on its own. Destinations can be added at
+// runtime, so "none configured right now" is not the same statement as "none is
+// possible" -- skipping the dispatcher there would mean an integration saved
+// from the panel silently does nothing until the process restarts.
+func newRecorder(store engine.Store, integrationStore IntegrationStore, cfg config, log *slog.Logger) (
+	engine.Store, *integration.Dispatcher, *integration.Supervisor, func(), error) {
 
 	// Decoding needs somewhere to read devices and models from. A store without a
 	// model repository cannot decode, which is the in-memory case.
 	canDecode := store.Models != nil && store.Devices != nil
-	if len(cfg.webhookURLs) == 0 && !canDecode {
-		return store, nil, func() {}, nil
+	if len(cfg.webhookURLs) == 0 && !canDecode && integrationStore == nil {
+		return store, nil, nil, func() {}, nil
 	}
 	sinks := make([]integration.Sink, 0, len(cfg.webhookURLs))
 	for _, raw := range cfg.webhookURLs {
@@ -307,13 +326,46 @@ func newRecorder(store engine.Store, cfg config, log *slog.Logger) (
 			Token: cfg.webhookToken,
 		})
 		if err != nil {
-			return engine.Store{}, nil, nil, err
+			return engine.Store{}, nil, nil, nil, err
 		}
 		sinks = append(sinks, w)
 	}
 	d := integration.New(store.Recorder, sinks, integration.Config{
 		Logger: log.With("component", "integration"),
 	})
+
+	// The supervisor owns the stored destinations and installs them alongside
+	// the environment ones. It is built only when there is somewhere to store
+	// them; without a store the panel gets a 503 rather than a form whose saves
+	// would be forgotten.
+	var supervisor *integration.Supervisor
+	if integrationStore != nil {
+		supervisor = integration.NewSupervisor(
+			func(ctx context.Context) ([]integration.Destination, error) {
+				stored, err := integrationStore.ListIntegrations(ctx)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]integration.Destination, 0, len(stored))
+				for _, in := range stored {
+					out = append(out, in.Destination)
+				}
+				return out, nil
+			},
+			d.SetSinks,
+			sinks,
+			log,
+		)
+		// Load before the engine starts, so a saved destination is delivering from
+		// the first frame rather than after somebody opens the panel.
+		if err := supervisor.Reload(context.Background()); err != nil {
+			// Not fatal: a database that is briefly unreadable should not stop the
+			// network. The dispatcher keeps the environment sinks, and a later
+			// write retries the load.
+			log.Error("cannot load stored integrations; continuing with environment ones", "err", err)
+		}
+	}
+
 	if canDecode {
 		// The persister is the same store the dispatcher wraps, when it can write
 		// decoded columns. The in-memory store cannot, and there decoding still
@@ -330,12 +382,12 @@ func newRecorder(store engine.Store, cfg config, log *slog.Logger) (
 	}
 	wrapped := store
 	wrapped.Recorder = d
-	if len(sinks) > 0 {
+	if len(d.Sinks()) > 0 {
 		log.Info("integrations enabled", "sinks", d.Sinks())
 	}
 	// sync.OnceFunc so the deferred close and the explicit shutdown path cannot
 	// both try to drain the queue.
-	return wrapped, d, sync.OnceFunc(func() { _ = d.Close() }), nil
+	return wrapped, d, supervisor, sync.OnceFunc(func() { _ = d.Close() }), nil
 }
 
 // modelSource adapts the engine's two repositories to the narrower port the
@@ -357,30 +409,32 @@ func (m modelSource) ModelByID(ctx context.Context, id string) (*engine.DeviceMo
 // openStore returns the engine store plus its release function. An empty DSN
 // selects in-memory state, which is announced loudly because it silently loses
 // sessions across a restart.
-func openStore(ctx context.Context, log *slog.Logger, dsn string) (engine.Store, gatewayPersister, func(), error) {
+func openStore(ctx context.Context, log *slog.Logger, dsn string) (engine.Store, gatewayPersister, IntegrationStore, func(), error) {
 	if dsn == "" {
 		log.Warn("NS_DATABASE_URL is not set: sessions, join-nonce replay " +
 			"protection and gateway presence live in memory and are lost on restart")
-		return engine.NewMemStore().Store(), nil, func() {}, nil
+		// No integration store either: an in-memory destination would accept a
+		// save and lose it on restart, which is worse than refusing the write.
+		return engine.NewMemStore().Store(), nil, nil, func() {}, nil
 	}
 
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
-		return engine.Store{}, nil, nil, fmt.Errorf("prepare the database pool: %w", err)
+		return engine.Store{}, nil, nil, nil, fmt.Errorf("prepare the database pool: %w", err)
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if err := pool.Ping(pingCtx); err != nil {
 		pool.Close()
-		return engine.Store{}, nil, nil, fmt.Errorf("the database is not reachable: %w", err)
+		return engine.Store{}, nil, nil, nil, fmt.Errorf("the database is not reachable: %w", err)
 	}
 
 	store := pgstore.New(pool)
 	if err := store.Migrate(ctx); err != nil {
 		pool.Close()
-		return engine.Store{}, nil, nil, fmt.Errorf("apply database migrations: %w", err)
+		return engine.Store{}, nil, nil, nil, fmt.Errorf("apply database migrations: %w", err)
 	}
 	// sync.OnceFunc so the deferred close and the explicit shutdown close cannot
 	// both run against the same pool.
-	return store.Store(), store, sync.OnceFunc(store.Close), nil
+	return store.Store(), store, store, sync.OnceFunc(store.Close), nil
 }

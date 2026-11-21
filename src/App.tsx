@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
 import {
-  Activity, Bell, Boxes, Braces, Menu, Radio, RadioTower, RefreshCw, Settings2,
+  Activity, ArrowLeftRight, Bell, Boxes, Braces, Menu, Radio, RadioTower, RefreshCw, Settings2,
 } from 'lucide-react'
 import { PageHeadingAction, SettingsForm } from './features/network/components'
 import { DeviceModels } from './features/network/panels/DeviceModels'
+import { Integrations } from './features/network/panels/Integrations'
 import { RegisterDeviceDialog } from './features/network/panels/RegisterDeviceDialog'
 import { gatewaySummary } from './features/network/control/status'
 import { UNASSIGNED_GROUP } from './features/network/constants'
@@ -20,7 +21,7 @@ import './App.css'
 const navigation: { name: View; icon: typeof Activity }[] = [
   { name: 'Overview', icon: Activity }, { name: 'Devices', icon: Boxes },
   { name: 'Gateways', icon: RadioTower }, { name: 'Models', icon: Braces },
-  { name: 'Events', icon: Radio },
+  { name: 'Integrations', icon: ArrowLeftRight }, { name: 'Events', icon: Radio },
 ]
 
 function App() {
@@ -153,7 +154,7 @@ function App() {
 
         <div className="page-content">
           <div className="page-heading">
-            <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : view === 'Models' ? 'Sensor types, and how their payloads are turned into readings.' : `${view} connected to your local network server.`}</p></div>
+            <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : view === 'Models' ? 'Sensor types, and how their payloads are turned into readings.' : view === 'Integrations' ? 'Push each decoded reading to your own systems as it arrives.' : `${view} connected to your local network server.`}</p></div>
             <div className="heading-actions"><button className="button button-secondary" onClick={() => void refresh()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button><PageHeadingAction view={view} canProvision={connection === 'connected'} onAddDevice={() => setShowAdd(true)} /></div>
           </div>
 
@@ -185,6 +186,7 @@ function App() {
           />}
           {view === 'Gateways' && <GatewaysView status={status} gateways={gateways} unheardGateways={unheardGateways} />}
           {view === 'Models' && <DeviceModels decoding={status?.decoding} />}
+          {view === 'Integrations' && <Integrations />}
           {view === 'Events' && <EventsView events={events} />}
           {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={settingsSave.save} saving={settingsSave.saving} error={settingsSave.error} message={settingsSave.message} disabled={connection === 'offline' || connection === 'loading'} regions={regions.regions} regionsAreFallback={regions.isFallback} />}
 

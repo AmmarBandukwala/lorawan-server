@@ -150,6 +150,22 @@ func (w *Webhook) Publish(ctx context.Context, ev Event) error {
 	return fmt.Errorf("integration: webhook %s after %d attempt(s): %w", w.host, w.attempts, lastErr)
 }
 
+// Test posts a probe event, which is what the panel's test button needs.
+//
+// The probe carries a distinct kind so a consumer can filter test traffic out.
+// A 4xx is reported here as a failure even though Publish deliberately does not
+// retry one: for delivery a 404 means "nothing dropped, the receiver does not
+// want this", but for a test the operator needs to hear that the endpoint is
+// wrong.
+func (w *Webhook) Test(ctx context.Context) error {
+	return w.Publish(ctx, Event{
+		Kind:       KindIntegrationTest,
+		DeviceEUI:  "0000000000000000",
+		ReceivedAt: time.Now().UTC(),
+		Data:       encodeBase64([]byte("fieldnode integration test")),
+	})
+}
+
 // attempt performs one POST and reports whether the failure is worth retrying.
 func (w *Webhook) attempt(ctx context.Context, body []byte) (retry bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, w.timeout)

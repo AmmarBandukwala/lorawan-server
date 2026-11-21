@@ -26,6 +26,10 @@ import (
 const (
 	testDevEUI  = "0102030405060708"
 	testModelID = "cold-chain-probe-v2"
+
+	// testIntegrationID is a valid destination id under the network server's
+	// slug rule, so a path built from it is one a real server would accept.
+	testIntegrationID = "cloud-mq"
 )
 
 type call struct {
@@ -101,9 +105,10 @@ func TestClientRoutes(t *testing.T) {
 func TestRoutesShareTheAPIPrefix(t *testing.T) {
 	const prefix = "/api/v1/"
 	for name, route := range map[string]string{
-		"devices": nsDeviceRoute,
-		"models":  nsModelRoute,
-		"uplinks": nsUplinkRoute,
+		"devices":      nsDeviceRoute,
+		"models":       nsModelRoute,
+		"uplinks":      nsUplinkRoute,
+		"integrations": nsIntegrationRoute,
 	} {
 		if !strings.HasPrefix(route, prefix) {
 			t.Errorf("%s route %q is not under the %s prefix the network server registers",
@@ -311,6 +316,23 @@ func clientCalls(devEUI, model string) []call {
 			http.MethodGet, "/api/v1/uplinks", "limit=20"},
 		{"Uplinks for one device", func(c *Client) error { _, e := c.Uplinks(context.Background(), devEUI, 5); return e },
 			http.MethodGet, "/api/v1/uplinks", "dev_eui=" + devEUI + "&limit=5"},
+
+		{"ListIntegrations", func(c *Client) error { _, e := c.ListIntegrations(context.Background()); return e },
+			http.MethodGet, "/api/v1/integrations", ""},
+		{"CreateIntegration", func(c *Client) error {
+			_, e := c.CreateIntegration(context.Background(), json.RawMessage(`{}`))
+			return e
+		}, http.MethodPost, "/api/v1/integrations", ""},
+		{"Integration", func(c *Client) error { _, e := c.Integration(context.Background(), testIntegrationID); return e },
+			http.MethodGet, "/api/v1/integrations/" + testIntegrationID, ""},
+		{"UpdateIntegration", func(c *Client) error {
+			_, e := c.UpdateIntegration(context.Background(), testIntegrationID, json.RawMessage(`{}`))
+			return e
+		}, http.MethodPut, "/api/v1/integrations/" + testIntegrationID, ""},
+		{"DeleteIntegration", func(c *Client) error { _, e := c.DeleteIntegration(context.Background(), testIntegrationID); return e },
+			http.MethodDelete, "/api/v1/integrations/" + testIntegrationID, ""},
+		{"TestIntegration", func(c *Client) error { _, e := c.TestIntegration(context.Background(), testIntegrationID); return e },
+			http.MethodPost, "/api/v1/integrations/" + testIntegrationID + "/test", ""},
 
 		// Health is read from the status port and is not under the API prefix,
 		// because the network server serves it from a separate mux.

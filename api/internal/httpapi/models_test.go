@@ -24,6 +24,10 @@ type recordingController struct {
 	limit  int
 	devEUI string
 	patch  nsclient.DevicePatch
+
+	// Integration relay: the destination id and the exact bytes forwarded.
+	integrationID   string
+	integrationBody string
 }
 
 func (c *recordingController) respond() (json.RawMessage, error) {
@@ -93,6 +97,40 @@ func (c *recordingController) TestModelDecode(_ context.Context, id string, body
 
 func (c *recordingController) Uplinks(_ context.Context, devEUI string, limit int) (json.RawMessage, error) {
 	c.method, c.devEUI, c.limit = "UPLINKS", devEUI, limit
+	return c.respond()
+}
+
+func (c *recordingController) ListIntegrations(context.Context) (json.RawMessage, error) {
+	c.method = "LIST_INTEGRATIONS"
+	return c.respond()
+}
+
+func (c *recordingController) Integration(_ context.Context, id string) (json.RawMessage, error) {
+	c.method, c.integrationID = "GET_INTEGRATION", id
+	return c.respond()
+}
+
+func (c *recordingController) CreateIntegration(_ context.Context, body json.RawMessage) (json.RawMessage, error) {
+	c.method, c.integrationBody = "CREATE_INTEGRATION", string(body)
+	return c.respond()
+}
+
+func (c *recordingController) UpdateIntegration(_ context.Context, id string, body json.RawMessage) (json.RawMessage, error) {
+	c.method, c.integrationID, c.integrationBody = "UPDATE_INTEGRATION", id, string(body)
+	return c.respond()
+}
+
+func (c *recordingController) DeleteIntegration(_ context.Context, id string) (json.RawMessage, error) {
+	c.method, c.integrationID = "DELETE_INTEGRATION", id
+	if c.err != nil {
+		return nil, c.err
+	}
+	// A delete answers with no body, which the relay must keep a 204.
+	return nil, nil
+}
+
+func (c *recordingController) TestIntegration(_ context.Context, id string) (json.RawMessage, error) {
+	c.method, c.integrationID = "TEST_INTEGRATION", id
 	return c.respond()
 }
 

@@ -23,6 +23,10 @@ type stubController struct {
 	calls     int
 	resp      json.RawMessage
 	err       error
+
+	// Integration relay assertions need the id and the exact bytes forwarded.
+	gotIntegrationID   string
+	gotIntegrationBody json.RawMessage
 }
 
 func (c *stubController) EnqueueDownlink(_ context.Context, devEUI string, fPort int, data string, confirmed bool) (json.RawMessage, error) {
@@ -138,6 +142,55 @@ func (c *stubController) TestModelDecode(context.Context, string, json.RawMessag
 func (c *stubController) Uplinks(context.Context, string, int) (json.RawMessage, error) {
 	c.calls++
 	return c.stubbed()
+}
+
+// Integration destinations. The id and body are recorded because the relay's whole
+// job is to pass them through unchanged — a body that lost a field on the way
+// through would silently drop a broker credential or a topic.
+func (c *stubController) ListIntegrations(context.Context) (json.RawMessage, error) {
+	c.calls++
+	return c.stubbed()
+}
+
+func (c *stubController) Integration(_ context.Context, id string) (json.RawMessage, error) {
+	c.calls++
+	c.gotIntegrationID = id
+	return c.stubbed()
+}
+
+func (c *stubController) CreateIntegration(_ context.Context, body json.RawMessage) (json.RawMessage, error) {
+	c.calls++
+	c.gotIntegrationBody = body
+	return c.stubbed()
+}
+
+func (c *stubController) UpdateIntegration(_ context.Context, id string, body json.RawMessage) (json.RawMessage, error) {
+	c.calls++
+	c.gotIntegrationID, c.gotIntegrationBody = id, body
+	return c.stubbed()
+}
+
+func (c *stubController) DeleteIntegration(_ context.Context, id string) (json.RawMessage, error) {
+	c.calls++
+	c.gotIntegrationID = id
+	if c.err != nil {
+		return nil, c.err
+	}
+	// The network server answers a delete with no body, which the handler must
+	// pass through as 204 rather than as an empty 200.
+	return nil, nil
+}
+
+func (c *stubController) TestIntegration(_ context.Context, id string) (json.RawMessage, error) {
+	c.calls++
+	c.gotIntegrationID = id
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.resp != nil {
+		return c.resp, nil
+	}
+	return json.RawMessage(`{"ok":true,"detail":"a test event was accepted"}`), nil
 }
 
 func (c *stubController) stubbed() (json.RawMessage, error) {

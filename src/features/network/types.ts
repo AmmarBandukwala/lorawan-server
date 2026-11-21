@@ -26,7 +26,7 @@ export type DeviceFilter = 'all' | DeviceState
  * or an arbitrary string, and the dropdown is built from the devices themselves.
  */
 export type GroupFilter = 'all' | string
-export type View = 'Overview' | 'Devices' | 'Gateways' | 'Models' | 'Events' | 'Settings'
+export type View = 'Overview' | 'Devices' | 'Gateways' | 'Models' | 'Integrations' | 'Events' | 'Settings'
 
 export const emptyOverview: Overview = {
   deviceCount: 0,

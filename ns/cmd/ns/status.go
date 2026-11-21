@@ -146,7 +146,7 @@ type statusView struct {
 	// Integrations reports the webhook dispatcher's counters, or nil when no
 	// endpoints are configured. A dropped count that keeps growing is the signal
 	// that a receiver is too slow, and this is where an operator sees it.
-	Integrations *integrationView `json:"integrations,omitempty"`
+	Integrations *integrationHealthView `json:"integrations,omitempty"`
 	// DutyCycle reports channel occupancy per gateway and sub-band, and is
 	// omitted when enforcement is disabled. A sub-band sitting at its budget is
 	// the explanation for downlinks that simply do not appear, and without this
@@ -219,7 +219,7 @@ func newListenerView(transport, bindAddr string, secured bool) listenerView {
 	}
 }
 
-type integrationView struct {
+type integrationHealthView struct {
 	Sinks     []string `json:"sinks"`
 	Published int64    `json:"published"`
 	Failed    int64    `json:"delivery_failures"`
@@ -316,7 +316,7 @@ func (s *statusServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.integr != nil {
 		st := s.integr.Stats()
-		view := &integrationView{
+		view := &integrationHealthView{
 			Sinks:     s.integr.Sinks(),
 			Published: st.Published,
 			Failed:    st.Failed,

@@ -6,10 +6,12 @@ import { ActivityItem, DeviceHeader, DeviceTable, GatewayCard, PageHeadingAction
 import { DeviceConsole } from '../src/features/network/panels/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/panels/DeviceSettings'
 import { DeviceModels } from '../src/features/network/panels/DeviceModels'
+import { Integrations } from '../src/features/network/panels/Integrations'
 import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/panels/Gateways'
 import { DecodeHealthPanel, NetworkServerPanel } from '../src/features/network/panels/NetworkHealth'
 import { attributeMap, attributeRows, describeDeviceEdit, diffDeviceEdit, locationFields, locationProblem } from '../src/features/network/control/device'
 import { modelIdProblem } from '../src/features/network/control/models'
+import { brokerURLProblem, integrationIdProblem, isBlockingProblem, webhookURLProblem } from '../src/features/network/control/integrations'
 import { decodeHealth, formatUptime, gatewaySummary, recentlyRestarted } from '../src/features/network/control/status'
 import { formatDecoded } from '../src/features/network/control/traffic'
 import type { NetworkStatus, ProvisionedDevice } from '../src/features/network/control/types'
@@ -310,6 +312,38 @@ assert('DeviceModels does not declare an empty fleet before the read',
 assert('an empty model id asks for one', modelIdProblem('') !== '')
 assert('a one-character model id is refused', modelIdProblem('p') !== '')
 assert('an upper-case model id is refused', modelIdProblem('Probe') !== '')
+
+// Integrations: where decoded events get pushed.
+const integrationsHtml = renderToString(h(Integrations))
+check('Integrations renders its heading', integrationsHtml, 'Event destinations')
+check('Integrations offers a new destination', integrationsHtml, 'New destination')
+assert('Integrations does not declare an empty set before the read',
+  !integrationsHtml.includes('Nothing is being pushed out yet'))
+
+assert('an empty destination id asks for one', integrationIdProblem('') !== '')
+assert('an upper-case destination id is refused', integrationIdProblem('Cloud-MQ') !== '')
+assert('a valid destination id is accepted', integrationIdProblem('cloud-mq') === '')
+
+// A broker address is checked for shape only. Reachability belongs to the network
+// server, which is the process that has to hold the connection.
+assert('an empty broker address is refused', isBlockingProblem(brokerURLProblem('')))
+assert('a scheme-less broker address is refused', isBlockingProblem(brokerURLProblem('broker.example:8883')))
+assert('an http:// broker scheme is refused', isBlockingProblem(brokerURLProblem('http://broker.example:8883')))
+assert('a host-less broker address is refused', isBlockingProblem(brokerURLProblem('tls://:8883')))
+assert('a tls:// broker address is accepted', !isBlockingProblem(brokerURLProblem('tls://broker.example:8883')))
+assert('a tcp:// broker address is accepted', !isBlockingProblem(brokerURLProblem('tcp://127.0.0.1:1883')))
+// Plain tcp:// to a host off the local network is advice, not a refusal: refusing
+// would block a working broker on a private network.
+assert('plain tcp:// to a remote host warns without blocking',
+  brokerURLProblem('tcp://broker.example:1883') !== '' && !isBlockingProblem(brokerURLProblem('tcp://broker.example:1883')))
+
+assert('an empty webhook URL is refused', isBlockingProblem(webhookURLProblem('')))
+assert('a non-HTTP webhook scheme is refused', isBlockingProblem(webhookURLProblem('ftp://host/hook')))
+assert('an https:// webhook URL is accepted', !isBlockingProblem(webhookURLProblem('https://host/hook')))
+assert('a localhost http:// webhook URL is accepted', !isBlockingProblem(webhookURLProblem('http://localhost:9000/hook')))
+assert('plain http:// to a remote host warns without blocking',
+  webhookURLProblem('http://host.example/hook') !== '' && !isBlockingProblem(webhookURLProblem('http://host.example/hook')))
+
 assert('a normal model id is accepted', modelIdProblem('cold-chain-probe-v2') === '')
 
 // A formatter's object becomes lines an operator can read. Nested and array
@@ -448,7 +482,7 @@ check('the counters say what they cover', cleanHtml, 'Only models that have sent
 // ---------------------------------------------------------------------------
 
 const deviceViews: View[] = ['Devices']
-const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Settings']
+const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Integrations', 'Settings']
 for (const view of deviceViews) {
   assert(`the heading offers device registration on ${view}`, viewOffersDeviceRegistration(view))
 }

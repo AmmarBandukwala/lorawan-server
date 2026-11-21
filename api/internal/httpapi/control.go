@@ -60,6 +60,17 @@ type Controller interface {
 	DeleteModel(ctx context.Context, modelID string) (json.RawMessage, error)
 	TestModelDecode(ctx context.Context, modelID string, body json.RawMessage) (json.RawMessage, error)
 	Uplinks(ctx context.Context, devEUI string, limit int) (json.RawMessage, error)
+
+	// Integration destinations, relayed for the same reason models are: the
+	// network server holds the credential, the connection and the delivery
+	// counters, so it is the only component that can say whether a destination
+	// is actually delivering.
+	ListIntegrations(ctx context.Context) (json.RawMessage, error)
+	Integration(ctx context.Context, id string) (json.RawMessage, error)
+	CreateIntegration(ctx context.Context, body json.RawMessage) (json.RawMessage, error)
+	UpdateIntegration(ctx context.Context, id string, body json.RawMessage) (json.RawMessage, error)
+	DeleteIntegration(ctx context.Context, id string) (json.RawMessage, error)
+	TestIntegration(ctx context.Context, id string) (json.RawMessage, error)
 }
 
 // maxDownlinkBytes mirrors the network server's own limit. Enforcing it here too

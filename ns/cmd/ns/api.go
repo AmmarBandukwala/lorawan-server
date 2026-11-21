@@ -41,6 +41,17 @@ type apiServer struct {
 	// pretending to work.
 	models  engine.ModelRepo
 	traffic TrafficReader
+	// integrations backs the integration CRUD endpoints, and reloadIntegrations
+	// applies a saved change to the live sinks. Both are nil on the in-memory
+	// store, which has nowhere to keep a destination, and then those endpoints
+	// answer 503 rather than accepting a write that would be lost on restart.
+	integrations       IntegrationStore
+	reloadIntegrations Integrations
+	// environmentSinkNames are destinations from NS_WEBHOOK_URLS. They are
+	// reported to the panel as read-only so it can account for every destination
+	// that is actually delivering.
+	environmentSinkNames []string
+
 	// invalidate tells the live payload decoder that a model changed, so an edit
 	// takes effect on the next frame instead of after a restart.
 	invalidate    func(modelID string)
@@ -93,6 +104,15 @@ func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceR
 	mux.HandleFunc("DELETE /api/v1/models/{model_id}", s.requireAuth(s.handleDeleteModel))
 	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", s.requireAuth(s.handleTestModelDecode))
 	mux.HandleFunc("GET /api/v1/uplinks", s.requireAuth(s.handleListUplinks))
+
+	// Integration destinations. Writes reload the live sinks before responding,
+	// so a 2xx means events will go there, not merely that a row was written.
+	mux.HandleFunc("GET /api/v1/integrations", s.requireAuth(s.handleListIntegrations))
+	mux.HandleFunc("POST /api/v1/integrations", s.requireAuth(s.handleCreateIntegration))
+	mux.HandleFunc("GET /api/v1/integrations/{id}", s.requireAuth(s.handleGetIntegration))
+	mux.HandleFunc("PUT /api/v1/integrations/{id}", s.requireAuth(s.handleUpdateIntegration))
+	mux.HandleFunc("DELETE /api/v1/integrations/{id}", s.requireAuth(s.handleDeleteIntegration))
+	mux.HandleFunc("POST /api/v1/integrations/{id}/test", s.requireAuth(s.handleTestIntegration))
 
 	s.http = &http.Server{
 		Addr:              addr,

@@ -106,8 +106,17 @@ const (
 	ErrModelSaveFailed   = "device_model_save_failed"
 	ErrModelDeleteFailed = "device_model_delete_failed"
 	ErrModelTestFailed   = "device_model_test_failed"
-	ErrUplinkListFailed  = "uplink_history_query_failed"
-	ErrLimitOutOfRange   = "limit_must_be_between_1_and_500"
+
+	// Integration destinations. The id message reuses the model wording's shape
+	// because the network server's rule is the same slug rule.
+	ErrIntegrationIDInvalid    = "integration_id_must_be_2_to_64_lowercase_letters_digits_dash_or_underscore"
+	ErrIntegrationTooLarge     = "integration_definition_too_large"
+	ErrIntegrationListFailed   = "integration_query_failed"
+	ErrIntegrationSaveFailed   = "integration_save_failed"
+	ErrIntegrationDeleteFailed = "integration_delete_failed"
+	ErrIntegrationTestFailed   = "integration_test_failed"
+	ErrUplinkListFailed        = "uplink_history_query_failed"
+	ErrLimitOutOfRange         = "limit_must_be_between_1_and_500"
 )
 
 // Input limits. Each is enforced here and mirrored by the database schema; the

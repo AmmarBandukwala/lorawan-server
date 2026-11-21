@@ -34,6 +34,10 @@ const (
 	nsModelRoute  = "/api/v1/models"
 	nsUplinkRoute = "/api/v1/uplinks"
 
+	// nsIntegrationRoute must match the network server's integration routes.
+	// The comment above is not hypothetical: this one is the reason it exists.
+	nsIntegrationRoute = "/api/v1/integrations"
+
 	// requestTimeout bounds one provisioning call. The network server may be
 	// starting alongside this process, so failing fast and letting the operator
 	// retry beats waiting on a container that is not answering yet.
