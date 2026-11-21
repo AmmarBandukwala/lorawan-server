@@ -494,7 +494,7 @@ other three columns refer to.
 | Transmission refused as duty cycle or dwell | `engine/dutycycle.go` `airtimeBudget.reserve` | `region/toa.go` for the airtime it computed |
 | Webhook missing events | `internal/integration/dispatcher.go` `Stats` — dropped vs failed | `dispatcher.go` `deliver`, then `webhook.go` for the attempt policy |
 | API returns an unexpected status | `cmd/ns/api_responses.go` `writeEngineError` | The code's meaning: `api/internal/httpapi/errors.go` on the console side |
-| Dashboard shows stale or empty panels | `src/features/network/api.ts` `loadNetworkSnapshot` | `failed` in the snapshot names which section, and why |
+| Dashboard shows stale or empty panels | `src/features/network/snapshot.ts` `loadNetworkSnapshot` | `failed` in the snapshot names which section, and why |
 
 ## References
 

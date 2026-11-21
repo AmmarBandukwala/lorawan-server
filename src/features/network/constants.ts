@@ -39,15 +39,6 @@ export const APP_KEY_HEX_DIGITS = 32
 export const FALLBACK_REGIONS = ['US915', 'EU868', 'AS923', 'AS923-2', 'AS923-3', 'AS923-4'] as const
 
 /**
- * The band a new facility starts on, matching the network server's default.
- *
- * It is a separate value from the list's first entry so that reordering the
- * dropdown for readability cannot silently change what a fresh installation
- * enforces.
- */
-export const DEFAULT_REGION: string = 'US915'
-
-/**
  * Device-status filters, each with the value it filters on and the label shown.
  *
  * The value `all` is deliberately not a display string. It used to be

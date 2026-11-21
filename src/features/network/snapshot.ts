@@ -1,5 +1,6 @@
 import type { Device, FacilitySettings, GatewayRecord, NetworkEvent, Overview } from './types'
 import { emptyOverview, emptySettings } from './types'
+import { API_PREFIX } from './constants'
 
 export type SectionKey = 'devices' | 'overview' | 'gateways' | 'events' | 'settings'
 
@@ -27,12 +28,10 @@ export const emptySnapshot: NetworkSnapshot = {
 }
 
 /**
- * Where the console's own API lives. Every route is derived from this, so the
- * prefix exists in one place — nginx maps it, the API serves it, and a change
- * here has to be matched in both of those.
+ * Where the console's own API lives. Imported rather than restated: nginx maps
+ * this prefix and the API serves it, so a second copy here could drift into a
+ * set of read paths that 404 while the control plane keeps working.
  */
-const API_PREFIX = '/api/v1'
-
 const endpoints: Record<SectionKey, string> = {
   devices: `${API_PREFIX}/devices`,
   overview: `${API_PREFIX}/overview`,

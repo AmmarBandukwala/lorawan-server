@@ -141,25 +141,6 @@ export function batteryPercent(battery: number | undefined): string {
   return `${Math.round((battery / 255) * 100)}%`
 }
 
-/** Renders a Go duration string ("1.5s", "250ms") as something compact. */
-export function formatDuration(value: string): string {
-  const match = /^(\d+(?:\.\d+)?)(ns|µs|us|ms|s|m|h)$/.exec(value)
-  if (!match) return value
-  const amount = Number(match[1])
-  switch (match[2]) {
-    case 'ms':
-      return `${amount < 10 ? amount.toFixed(1) : Math.round(amount)} ms`
-    case 's':
-      return `${amount < 10 ? amount.toFixed(2) : amount.toFixed(1)} s`
-    case 'm':
-      return `${amount.toFixed(1)} min`
-    case 'h':
-      return `${amount.toFixed(1)} h`
-    default:
-      return value
-  }
-}
-
 /**
  * Whether a hex string is something the network will accept.
  *
