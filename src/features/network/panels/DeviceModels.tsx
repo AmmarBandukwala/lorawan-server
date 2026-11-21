@@ -36,7 +36,7 @@ export function DeviceModels({ decoding }: { decoding?: NetworkStatus['decoding'
   // network server knows: it is the one that runs the script, and a model can
   // look perfectly configured in the database while every frame from its devices
   // goes undecoded.
-  const brokenIds = new Set((decoding?.broken_models ?? []).map((b) => b.model_id))
+  const brokenIds = new Set((decoding?.broken_models ?? []).map((model) => model.model_id))
 
   const load = useCallback(async () => {
     try {

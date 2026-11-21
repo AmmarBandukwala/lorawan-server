@@ -11,7 +11,7 @@ import { request } from './http'
 export const fetchUplinks = (devEUI?: string, limit = 20) => {
   const params = new URLSearchParams({ limit: String(limit) })
   if (devEUI) params.set('dev_eui', devEUI)
-  return request<{ uplinks: UplinkRow[] }>('GET', `/uplinks?${params}`).then((r) => r.uplinks ?? [])
+  return request<{ uplinks: UplinkRow[] }>('GET', `/uplinks?${params}`).then((body) => body.uplinks ?? [])
 }
 
 /**

@@ -61,7 +61,7 @@ export function NetworkServerPanel({ status, inventoryIds }: {
       {status.transports && status.transports.length > 0 && (
         <p className="panel-note">
           <RadioTower size={11} /> Listening for{' '}
-          {status.transports.map((t) => transportLabel(t)).join(' and ')}
+          {status.transports.map((transport) => transportLabel(transport)).join(' and ')}
         </p>
       )}
     </article>
@@ -103,10 +103,10 @@ export function DecodeHealthPanel({ decoding }: { decoding: NetworkStatus['decod
 
       {health.broken.length > 0 && (
         <div className="broken-list">
-          {health.broken.map((b) => (
-            <div className="broken-row" key={b.model_id}>
-              <code>{b.model_id}</code>
-              <span>{b.reason}</span>
+          {health.broken.map((model) => (
+            <div className="broken-row" key={model.model_id}>
+              <code>{model.model_id}</code>
+              <span>{model.reason}</span>
             </div>
           ))}
         </div>

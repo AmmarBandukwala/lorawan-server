@@ -108,7 +108,7 @@ export function gatewaySummary(status: NetworkStatus | null, inventoryIds: strin
   if (!status) {
     return { online: 0, total: inventoryIds.length, source: 'inventory' }
   }
-  const heard = new Set(status.gateways.map((g) => g.gateway_eui.toUpperCase()))
+  const heard = new Set(status.gateways.map((gateway) => gateway.gateway_eui.toUpperCase()))
   const unheard = inventoryIds.filter((id) => !heard.has(id.toUpperCase())).length
   return {
     online: status.gateways_online,

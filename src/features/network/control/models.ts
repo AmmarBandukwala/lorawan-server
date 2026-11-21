@@ -17,7 +17,7 @@ export function modelIdProblem(id: string): string {
 }
 
 export const fetchModels = () =>
-  request<{ models: DeviceModel[] }>('GET', '/models').then((r) => r.models ?? [])
+  request<{ models: DeviceModel[] }>('GET', '/models').then((body) => body.models ?? [])
 
 export const fetchModel = (modelID: string) =>
   request<DeviceModel>('GET', `/models/${modelID}`, undefined, {

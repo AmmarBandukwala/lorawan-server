@@ -215,7 +215,7 @@ export function describeDeviceEdit(edit: DeviceEdit): string {
     parts.push(edit.modelId === '' ? 'model cleared (uplinks will no longer be decoded)' : `model ${edit.modelId}`)
   }
   if (parts.length === 0) return 'Saved.'
-  const radio = parts.some((p) => p.includes('ADR') || p.includes('DR') || p.includes('class'))
+  const radio = parts.some((part) => part.includes('ADR') || part.includes('DR') || part.includes('class'))
   return `Saved: ${parts.join(', ')}.${radio ? ' Takes effect on the device’s next uplink.' : ''}`
 }
 

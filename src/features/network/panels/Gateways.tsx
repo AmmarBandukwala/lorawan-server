@@ -26,11 +26,11 @@ export function GatewayConnectPanel({ listeners, transports }: {
   // answer — so the rows render without a port rather than disappearing.
   const rows: { transport: string; port?: string; wildcard: boolean; secured: boolean }[] =
     listeners && listeners.length > 0
-      ? listeners.map((l) => ({
-        transport: l.transport,
-        port: l.port > 0 ? String(l.port) : undefined,
-        wildcard: l.host_wildcard,
-        secured: l.secured,
+      ? listeners.map((listener) => ({
+        transport: listener.transport,
+        port: listener.port > 0 ? String(listener.port) : undefined,
+        wildcard: listener.host_wildcard,
+        secured: listener.secured,
       }))
       : (transports ?? []).map((transport) => ({ transport, wildcard: true, secured: false }))
 

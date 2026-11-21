@@ -131,7 +131,7 @@ export function Integrations() {
         <IntegrationEditor
           id={editing.id}
           isNew={editing.isNew}
-          known={integrations.find((i) => i.id === editing.id)}
+          known={integrations.find((integration) => integration.id === editing.id)}
           onClose={close}
           onCreated={(id) => setEditing({ id, isNew: false })}
         />

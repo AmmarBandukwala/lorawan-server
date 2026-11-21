@@ -83,7 +83,7 @@ export function isBlockingProblem(problem: string): boolean {
 }
 
 export const fetchIntegrations = () =>
-  request<{ integrations: Integration[] }>('GET', '/integrations').then((r) => r.integrations ?? [])
+  request<{ integrations: Integration[] }>('GET', '/integrations').then((body) => body.integrations ?? [])
 
 export const createIntegration = (input: IntegrationInput) =>
   request<Integration>('POST', '/integrations', payload(input), {
