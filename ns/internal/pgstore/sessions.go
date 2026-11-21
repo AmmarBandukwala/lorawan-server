@@ -40,7 +40,7 @@ func (s *Store) SessionByDevAddr(ctx context.Context, devAddr lorawan.DevAddr) (
 
 func scanSession(row pgx.Row) (*engine.Session, error) {
 	var (
-		session             engine.Session
+		session         engine.Session
 		devEUI, devAddr string
 		nwkSKey         string
 		appSKey         string
