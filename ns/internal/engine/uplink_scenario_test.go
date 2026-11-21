@@ -44,8 +44,8 @@ func TestUplinkDecryptsAndDownlinkIsAcknowledged(t *testing.T) {
 	if frames := env.GW.Frames(); len(frames) != 0 {
 		t.Errorf("uplink with nothing queued produced %d downlink(s), want 0", len(frames))
 	}
-	if ses := env.Session(devEUI); ses.FCntUp != 1 {
-		t.Errorf("session FCntUp = %d, want 1 (next expected)", ses.FCntUp)
+	if session := env.Session(devEUI); session.FCntUp != 1 {
+		t.Errorf("session FCntUp = %d, want 1 (next expected)", session.FCntUp)
 	}
 
 	// Queue an application downlink; it must ride the next uplink's RX window.
@@ -77,11 +77,11 @@ func TestUplinkDecryptsAndDownlinkIsAcknowledged(t *testing.T) {
 	env.GW.Reset()
 	env.Uplink(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte("3"), ACK: true}, gateway.RxWindow1)
 
-	ses := env.Session(devEUI)
-	if ses.Pending != nil {
-		t.Errorf("pending downlink survived the acknowledgement: %+v", ses.Pending)
+	session := env.Session(devEUI)
+	if session.Pending != nil {
+		t.Errorf("pending downlink survived the acknowledgement: %+v", session.Pending)
 	}
-	if ses.AFCntDown == 0 {
+	if session.AFCntDown == 0 {
 		t.Error("AFCntDown was not recorded from the ACK bit")
 	}
 	if frames := env.GW.Frames(); len(frames) != 0 {
@@ -152,12 +152,12 @@ func TestDeviceStatusRoundTrip(t *testing.T) {
 		}},
 	}, gateway.RxWindow1)
 
-	ses := env.Session(devEUI)
-	if !ses.HasDeviceStatus {
+	session := env.Session(devEUI)
+	if !session.HasDeviceStatus {
 		t.Fatal("device status was not recorded on the session")
 	}
-	if ses.Battery != 187 || ses.Margin != -4 {
-		t.Errorf("device status = battery %d margin %d, want 187/-4", ses.Battery, ses.Margin)
+	if session.Battery != 187 || session.Margin != -4 {
+		t.Errorf("device status = battery %d margin %d, want 187/-4", session.Battery, session.Margin)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
 	}
 
 	// Until the device answers, the server must not assume the new parameters.
-	if ses := env.Session(devEUI); ses.DataRate == 3 {
+	if session := env.Session(devEUI); session.DataRate == 3 {
 		t.Error("the data-rate changed before the device acknowledged it")
 	}
 
@@ -211,12 +211,12 @@ func TestLinkADRApplyOnlyAfterAnswer(t *testing.T) {
 		}},
 	}, gateway.RxWindow1)
 
-	ses := env.Session(devEUI)
-	if ses.DataRate != 3 || ses.TxPower != 2 || ses.NbTrans != 1 {
+	session := env.Session(devEUI)
+	if session.DataRate != 3 || session.TxPower != 2 || session.NbTrans != 1 {
 		t.Errorf("after LinkADRAns session = DR%d TX%d NbTrans%d, want DR3 TX2 NbTrans1",
-			ses.DataRate, ses.TxPower, ses.NbTrans)
+			session.DataRate, session.TxPower, session.NbTrans)
 	}
-	if ses.PendingADR != nil {
+	if session.PendingADR != nil {
 		t.Error("the ADR request was not cleared after the answer")
 	}
 }
@@ -240,10 +240,10 @@ func TestLinkADRRefusalKeepsParameters(t *testing.T) {
 		MACCommands: lorawan.MACCommandSet{{CID: lorawan.CIDLinkADR, Payload: []byte{0x00}}},
 	}, gateway.RxWindow1)
 
-	ses := env.Session(devEUI)
-	if ses.DataRate != before.DataRate || ses.TxPower != before.TxPower {
+	session := env.Session(devEUI)
+	if session.DataRate != before.DataRate || session.TxPower != before.TxPower {
 		t.Errorf("a refused ADR changed the session: DR%d TX%d, want DR%d TX%d",
-			ses.DataRate, ses.TxPower, before.DataRate, before.TxPower)
+			session.DataRate, session.TxPower, before.DataRate, before.TxPower)
 	}
 	if len(env.Store.EventsWithReason("link_adr_rejected")) != 1 {
 		t.Errorf("want one link_adr_rejected event, got %+v", env.Store.Events())
@@ -255,14 +255,14 @@ func TestABPUplink(t *testing.T) {
 	ctx := context.Background()
 
 	dev := env.Provision(false)
-	ses := &engine.Session{
+	session := &engine.Session{
 		DevEUI: dev.DevEUI, DevAddr: dev.DevAddr,
 		NwkSKey: dev.NwkSKey, AppSKey: dev.AppSKey,
 		KeyEpoch: 1, Region: "EU868",
 		DataRate: testenv.EU868DR5, TxPower: 0, NbTrans: 1,
 		Rx2DataRate: engine.UseRegionDefault,
 	}
-	if err := env.Store.SaveSession(ctx, ses); err != nil {
+	if err := env.Store.SaveSession(ctx, session); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
@@ -352,12 +352,12 @@ func TestUplinkFOptsAreEncryptedOnTheWire(t *testing.T) {
 	if err := env.UplinkWire(wire); err != nil {
 		t.Fatalf("HandleUplink: %v", err)
 	}
-	ses := env.Session(devEUI)
-	if !ses.HasDeviceStatus {
+	session := env.Session(devEUI)
+	if !session.HasDeviceStatus {
 		t.Fatalf("encrypted FOpts were not decoded; events: %+v", env.Store.Events())
 	}
-	if ses.Battery != 210 || ses.Margin != 7 {
-		t.Errorf("device status = battery %d margin %d, want 210/7", ses.Battery, ses.Margin)
+	if session.Battery != 210 || session.Margin != 7 {
+		t.Errorf("device status = battery %d margin %d, want 210/7", session.Battery, session.Margin)
 	}
 }
 

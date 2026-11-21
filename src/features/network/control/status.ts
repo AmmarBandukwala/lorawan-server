@@ -25,11 +25,15 @@ export function decodeHealth(decoding: NetworkStatus['decoding']): {
   if (broken.length > 0) {
     // Naming the models is the point: "2 broken formatters" is a number to walk
     // past, "aqi-pro: unexpected token" is a task.
-    const names = broken.map((b) => b.model_id).join(', ')
-    problem = `${broken.length} device ${broken.length === 1 ? 'model has' : 'models have'} a payload formatter that will not run (${names}). Every frame from those devices is stored undecoded, and the devices themselves look healthy.`
+    const names = broken.map((model) => model.model_id).join(', ')
+    const noun = broken.length === 1 ? 'model has' : 'models have'
+    problem = `${broken.length} device ${noun} a payload formatter that will not run (${names}). `
+      + 'Every frame from those devices is stored undecoded, and the devices themselves look healthy.'
     if (broken[0].reason) problem += ` First reported: ${broken[0].reason}`
   } else if (decoding.frames_failed > 0) {
-    problem = `${decoding.frames_failed.toLocaleString()} ${decoding.frames_failed === 1 ? 'frame was' : 'frames were'} rejected by its formatter since the server started. The formatters compile, so these are frames the scripts refused.`
+    const verb = decoding.frames_failed === 1 ? 'frame was' : 'frames were'
+    problem = `${decoding.frames_failed.toLocaleString()} ${verb} rejected by its formatter since the server started. `
+      + 'The formatters compile, so these are frames the scripts refused.'
   }
 
   return {

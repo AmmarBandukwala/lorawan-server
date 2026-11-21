@@ -21,7 +21,7 @@ var ErrPendingDownlinkExists = errors.New("engine: device already has a pending 
 //
 // gwCnt is how many gateways received the uplink the commands arrived in, which
 // LinkCheckAns reports back to the device.
-func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Session,
+func (e *Engine) processMACCommands(ctx context.Context, dev *Device, session *Session,
 	cmds lorawan.MACCommandSet, reg region.Region, gwCnt int) (lorawan.MACCommandSet, error) {
 
 	var replies lorawan.MACCommandSet
@@ -31,105 +31,105 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 		case lorawan.CIDLinkADR: // uplink: LinkADRAns
 			p, err := lorawan.ParseLinkADRAns(cmd.Payload)
 			if err != nil {
-				e.malformed(ctx, ses, "LinkADRAns", err)
+				e.malformed(ctx, session, "LinkADRAns", err)
 				continue
 			}
-			ses.AwaitingLinkADRAns = false
+			session.AwaitingLinkADRAns = false
 			// The device answered, so however many attempts it took, the
 			// exchange is over and the budget starts again for the next one.
-			ses.LinkADRRetries = 0
+			session.LinkADRRetries = 0
 			if p.PowerACK && p.DataRateACK && p.ChannelACK {
-				if req := ses.PendingADR; req != nil {
-					ses.DataRate = req.DataRate
-					ses.TxPower = req.TxPower
-					ses.NbTrans = req.NbTrans
-					ses.PendingADR = nil
+				if req := session.PendingADR; req != nil {
+					session.DataRate = req.DataRate
+					session.TxPower = req.TxPower
+					session.NbTrans = req.NbTrans
+					session.PendingADR = nil
 				}
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Detail: fmt.Sprintf("LinkADR accepted: DR%d TX%d NbTrans%d",
-						ses.DataRate, ses.TxPower, ses.NbTrans),
+						session.DataRate, session.TxPower, session.NbTrans),
 				})
 			} else {
-				ses.PendingADR = nil
+				session.PendingADR = nil
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Reason: ReasonLinkADRRejected,
 					Detail: fmt.Sprintf("LinkADR refused (power=%t data-rate=%t channel=%t), keeping DR%d TX%d",
-						p.PowerACK, p.DataRateACK, p.ChannelACK, ses.DataRate, ses.TxPower),
+						p.PowerACK, p.DataRateACK, p.ChannelACK, session.DataRate, session.TxPower),
 				})
 			}
 
 		case lorawan.CIDDevStatus: // uplink: DevStatusAns
 			p, err := lorawan.ParseDevStatusAns(cmd.Payload)
 			if err != nil {
-				e.malformed(ctx, ses, "DevStatusAns", err)
+				e.malformed(ctx, session, "DevStatusAns", err)
 				continue
 			}
-			ses.HasDeviceStatus = true
-			ses.Battery = p.Battery
-			ses.Margin = p.SNR
+			session.HasDeviceStatus = true
+			session.Battery = p.Battery
+			session.Margin = p.SNR
 			e.recordEvent(ctx, Event{
-				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 				Detail: fmt.Sprintf("device status: battery %d/255, margin %d dB", p.Battery, p.SNR),
 			})
 
 		case lorawan.CIDRXParamSetup: // uplink: RXParamSetupAns
 			p, err := lorawan.ParseRXParamSetupAns(cmd.Payload)
 			if err != nil {
-				e.malformed(ctx, ses, "RXParamSetupAns", err)
+				e.malformed(ctx, session, "RXParamSetupAns", err)
 				continue
 			}
-			if req := ses.PendingRX2; req != nil {
+			if req := session.PendingRX2; req != nil {
 				if p.RX2Frequency {
-					ses.Rx2FrequencyHz = req.FrequencyHz
-					ses.Rx2DataRate = req.DataRate
+					session.Rx2FrequencyHz = req.FrequencyHz
+					session.Rx2DataRate = req.DataRate
 				}
-				ses.PendingRX2 = nil
+				session.PendingRX2 = nil
 			}
 			e.recordEvent(ctx, Event{
-				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 				Detail: fmt.Sprintf("RXParamSetup answer (channel=%t rx2-freq=%t rx1-dr-offset=%t), RX2 now %d Hz / DR%d",
-					p.Channel, p.RX2Frequency, p.RX1DROffset, ses.Rx2FrequencyHz, ses.Rx2DataRate),
+					p.Channel, p.RX2Frequency, p.RX1DROffset, session.Rx2FrequencyHz, session.Rx2DataRate),
 			})
 
 		case lorawan.CIDRXTimingSetup: // uplink: RXTimingSetupAns (no payload)
 			// The answer carries no status bits, so receiving it is the
 			// confirmation. Applying the delay here rather than when the request
 			// was sent keeps the server's idea of RX1 in step with the device's.
-			if req := ses.PendingRX1Delay; req != nil {
-				ses.Rx1Delay = req.DelaySeconds
-				ses.PendingRX1Delay = nil
+			if req := session.PendingRX1Delay; req != nil {
+				session.Rx1Delay = req.DelaySeconds
+				session.PendingRX1Delay = nil
 			}
 			e.recordEvent(ctx, Event{
-				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
-				Detail: fmt.Sprintf("RXTimingSetup acknowledged (RX1 delay %d s)", ses.Rx1Delay),
+				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
+				Detail: fmt.Sprintf("RXTimingSetup acknowledged (RX1 delay %d s)", session.Rx1Delay),
 			})
 
 		case lorawan.CIDDutyCycle: // uplink: DutyCycleAns (no payload)
-			if req := ses.PendingDutyCycle; req != nil {
+			if req := session.PendingDutyCycle; req != nil {
 				// RP002 Table 13: the index is a power-of-two divisor of the
 				// device's unrestricted duty cycle, index 0 meaning "as the
 				// device is". Storing the fraction lets the scheduler reason in
 				// percentages without re-reading the table.
-				ses.DutyCycle = 1.0 / float64(uint32(1)<<req.MaxDutyCycleIndex)
-				ses.PendingDutyCycle = nil
+				session.DutyCycle = 1.0 / float64(uint32(1)<<req.MaxDutyCycleIndex)
+				session.PendingDutyCycle = nil
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Detail: fmt.Sprintf("duty cycle limited to 1/%d", uint32(1)<<req.MaxDutyCycleIndex),
 				})
 			}
 
 		case lorawan.CIDTXParamSetup: // uplink: TXParamSetupAns (no payload)
-			if req := ses.PendingTXParams; req != nil {
-				ses.UplinkDwell400 = req.UplinkDwell400
-				ses.DownlinkDwell400 = req.DownlinkDwell400
-				ses.MaxEIRPIndex = req.MaxEIRPIndex
-				ses.PendingTXParams = nil
+			if req := session.PendingTXParams; req != nil {
+				session.UplinkDwell400 = req.UplinkDwell400
+				session.DownlinkDwell400 = req.DownlinkDwell400
+				session.MaxEIRPIndex = req.MaxEIRPIndex
+				session.PendingTXParams = nil
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Detail: fmt.Sprintf("TX parameters acknowledged (uplink dwell 400ms=%t, downlink dwell 400ms=%t, max EIRP index %d)",
-						ses.UplinkDwell400, ses.DownlinkDwell400, ses.MaxEIRPIndex),
+						session.UplinkDwell400, session.DownlinkDwell400, session.MaxEIRPIndex),
 				})
 			}
 
@@ -140,7 +140,7 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 			// gateways can hear has a better network than one that reports a
 			// single gateway, and its margin should reflect the best of the two
 			// links rather than whichever packet arrived first.
-			margin := int8(roundSNR(ses.LastSNR - requiredSNRForDataRate(reg, ses.DataRate)))
+			margin := int8(roundSNR(session.LastSNR - requiredSNRForDataRate(reg, session.DataRate)))
 			if margin < 0 {
 				margin = 0 // the field is unsigned in spirit; a negative margin
 				// means "at the edge", which 0 already tells the device.
@@ -156,16 +156,16 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 		case lorawan.CIDNewChannel: // uplink: NewChannelAns
 			p, err := lorawan.ParseNewChannelAns(cmd.Payload)
 			if err != nil {
-				e.malformed(ctx, ses, "NewChannelAns", err)
+				e.malformed(ctx, session, "NewChannelAns", err)
 				continue
 			}
 			// NewChannelAns answers a NewChannelReq, so it gets no reply of its
 			// own: CID 0x07 on an uplink is the device reporting, and the only
 			// thing the network owes it is to remember the answer.
-			req := ses.PendingChannel
+			req := session.PendingChannel
 			if req == nil {
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Reason: ReasonUnexpectedMACAnswer,
 					Detail: fmt.Sprintf("NewChannelAns with no request outstanding (frequency-ok=%t data-rate-ok=%t)",
 						p.ChannelFreqOK, p.DataRateRangeOK),
@@ -173,22 +173,22 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 				continue
 			}
 			if p.ChannelFreqOK && p.DataRateRangeOK {
-				if ses.UserChannels == nil {
-					ses.UserChannels = map[int]region.Channel{}
+				if session.UserChannels == nil {
+					session.UserChannels = map[int]region.Channel{}
 				}
 				rates := make([]int, 0, req.MaxDataRate-req.MinDataRate+1)
 				for i := req.MinDataRate; i <= req.MaxDataRate; i++ {
 					rates = append(rates, i)
 				}
-				ses.UserChannels[req.Index] = region.Channel{
+				session.UserChannels[req.Index] = region.Channel{
 					FrequencyHz: req.FrequencyHz,
 					DataRates:   rates,
 					Enabled:     true,
 					UserDefined: true,
 				}
-				ses.PendingChannel = nil
+				session.PendingChannel = nil
 				e.recordEvent(ctx, Event{
-					Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+					Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 					Detail: fmt.Sprintf("channel %d accepted: %d Hz, DR%d..DR%d",
 						req.Index, req.FrequencyHz, req.MinDataRate, req.MaxDataRate),
 				})
@@ -197,9 +197,9 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 			// A refusal is final for this request: the device has said it cannot
 			// use this channel, and asking again in the next window would be a
 			// loop that never ends.
-			ses.PendingChannel = nil
+			session.PendingChannel = nil
 			e.recordEvent(ctx, Event{
-				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 				Reason: ReasonNewChannelRefused,
 				Detail: fmt.Sprintf("device refused channel %d (%d Hz, DR%d..DR%d): frequency-ok=%t data-rate-ok=%t",
 					req.Index, req.FrequencyHz, req.MinDataRate, req.MaxDataRate,
@@ -208,17 +208,17 @@ func (e *Engine) processMACCommands(ctx context.Context, dev *Device, ses *Sessi
 
 		default:
 			e.log.Debug("unhandled uplink MAC command",
-				"dev_eui", ses.DevEUI, "cid", fmt.Sprintf("0x%02x", byte(cmd.CID)))
+				"dev_eui", session.DevEUI, "cid", fmt.Sprintf("0x%02x", byte(cmd.CID)))
 		}
 	}
 	return replies, nil
 }
 
-func (e *Engine) malformed(ctx context.Context, ses *Session, name string, err error) {
+func (e *Engine) malformed(ctx context.Context, session *Session, name string, err error) {
 	e.recordEvent(ctx, Event{
 		Kind: EventUplinkDrop, Reason: ReasonMalformedMACPayload,
 		Detail: fmt.Sprintf("%s: %v", name, err),
-		DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+		DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 	})
 }
 

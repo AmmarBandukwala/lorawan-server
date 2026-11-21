@@ -102,8 +102,8 @@ func TestFrameCounterGapTooLarge(t *testing.T) {
 	if len(env.Store.EventsWithReason(engine.ReasonFCntGapTooLarge)) != 1 {
 		t.Errorf("want one %s event, got %+v", engine.ReasonFCntGapTooLarge, env.Store.Events())
 	}
-	if ses := env.Session(testenv.MustEUI64(t, testenv.DevEUI)); ses.FCntUp != 0 {
-		t.Errorf("a rejected frame advanced FCntUp to %d, want 0", ses.FCntUp)
+	if session := env.Session(testenv.MustEUI64(t, testenv.DevEUI)); session.FCntUp != 0 {
+		t.Errorf("a rejected frame advanced FCntUp to %d, want 0", session.FCntUp)
 	}
 }
 
@@ -120,8 +120,8 @@ func TestRetransmissionIsAcceptedWithoutAdvancingCounter(t *testing.T) {
 	if err := env.UplinkWire(wire); err != nil {
 		t.Fatalf("HandleUplink: %v", err)
 	}
-	if ses := env.Session(devEUI); ses.FCntUp != 1 {
-		t.Fatalf("FCntUp = %d after the first uplink, want 1", ses.FCntUp)
+	if session := env.Session(devEUI); session.FCntUp != 1 {
+		t.Fatalf("FCntUp = %d after the first uplink, want 1", session.FCntUp)
 	}
 
 	// The device never heard our answer and repeats the same counter. Outside
@@ -141,8 +141,8 @@ func TestRetransmissionIsAcceptedWithoutAdvancingCounter(t *testing.T) {
 	if uplinks[1].FCntUp != uplinks[0].FCntUp {
 		t.Errorf("retransmission counter %d != original %d", uplinks[1].FCntUp, uplinks[0].FCntUp)
 	}
-	if ses := env.Session(devEUI); ses.FCntUp != 1 {
-		t.Errorf("a retransmission advanced FCntUp to %d, want it to stay 1", ses.FCntUp)
+	if session := env.Session(devEUI); session.FCntUp != 1 {
+		t.Errorf("a retransmission advanced FCntUp to %d, want it to stay 1", session.FCntUp)
 	}
 }
 
@@ -193,7 +193,7 @@ func TestUnacknowledgedDownlinkIsRetransmittedWithSameCounter(t *testing.T) {
 	if last := after[len(after)-1]; last.FCntDown != 1 {
 		t.Errorf("retransmission FCntDown = %d, want 1 (unchanged)", last.FCntDown)
 	}
-	if ses := env.Session(devEUI); ses.Pending == nil {
+	if session := env.Session(devEUI); session.Pending == nil {
 		t.Error("the pending downlink disappeared before it was acknowledged")
 	}
 }

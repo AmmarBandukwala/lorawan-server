@@ -40,7 +40,7 @@ func (s *Store) SessionByDevAddr(ctx context.Context, devAddr lorawan.DevAddr) (
 
 func scanSession(row pgx.Row) (*engine.Session, error) {
 	var (
-		ses             engine.Session
+		session             engine.Session
 		devEUI, devAddr string
 		nwkSKey         string
 		appSKey         string
@@ -65,12 +65,12 @@ func scanSession(row pgx.Row) (*engine.Session, error) {
 	err = row.Scan(
 		&devEUI, &devAddr, &nwkSKey, &appSKey, &keyEpoch,
 		&fCntUp, &fCntDown, &afCntDown,
-		&ses.Region, &ses.DataRate, &ses.TxPower, &ses.NbTrans, &ses.Rx1Delay, &ses.Rx1DROffset,
-		&ses.Rx2DataRate, &rx2FrequencyHz,
-		&ses.AwaitingLinkADRAns, &pendingADR, &pendingRX2, &pendingDownlink,
-		&ses.HasDeviceStatus, &battery, &margin,
-		&lastUplinkAt, &lastDownlinkAt, &ses.LastRSSI, &ses.LastSNR,
-		&gatewayID, &lastFreqHz, &ses.LastDataRateIndex, &macStateRaw,
+		&session.Region, &session.DataRate, &session.TxPower, &session.NbTrans, &session.Rx1Delay, &session.Rx1DROffset,
+		&session.Rx2DataRate, &rx2FrequencyHz,
+		&session.AwaitingLinkADRAns, &pendingADR, &pendingRX2, &pendingDownlink,
+		&session.HasDeviceStatus, &battery, &margin,
+		&lastUplinkAt, &lastDownlinkAt, &session.LastRSSI, &session.LastSNR,
+		&gatewayID, &lastFreqHz, &session.LastDataRateIndex, &macStateRaw,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, engine.ErrNotFound
@@ -79,93 +79,93 @@ func scanSession(row pgx.Row) (*engine.Session, error) {
 		return nil, fmt.Errorf("pgstore: session query: %w", err)
 	}
 
-	if ses.DevEUI, err = parseEUI(devEUI); err != nil {
+	if session.DevEUI, err = parseEUI(devEUI); err != nil {
 		return nil, err
 	}
-	if ses.DevAddr, err = parseDevAddr(devAddr); err != nil {
+	if session.DevAddr, err = parseDevAddr(devAddr); err != nil {
 		return nil, err
 	}
-	if ses.NwkSKey, err = parseKey(nwkSKey); err != nil {
+	if session.NwkSKey, err = parseKey(nwkSKey); err != nil {
 		return nil, err
 	}
-	if ses.AppSKey, err = parseKey(appSKey); err != nil {
+	if session.AppSKey, err = parseKey(appSKey); err != nil {
 		return nil, err
 	}
 	if gatewayID != "" {
-		if ses.LastGatewayID, err = parseEUI(gatewayID); err != nil {
+		if session.LastGatewayID, err = parseEUI(gatewayID); err != nil {
 			return nil, err
 		}
 	}
 	if len(pendingADR) > 0 {
-		ses.PendingADR = &engine.ADRRequest{}
-		if err := json.Unmarshal(pendingADR, ses.PendingADR); err != nil {
+		session.PendingADR = &engine.ADRRequest{}
+		if err := json.Unmarshal(pendingADR, session.PendingADR); err != nil {
 			return nil, fmt.Errorf("pgstore: pending_adr: %w", err)
 		}
 	}
 	if len(pendingRX2) > 0 {
-		ses.PendingRX2 = &engine.RX2Request{}
-		if err := json.Unmarshal(pendingRX2, ses.PendingRX2); err != nil {
+		session.PendingRX2 = &engine.RX2Request{}
+		if err := json.Unmarshal(pendingRX2, session.PendingRX2); err != nil {
 			return nil, fmt.Errorf("pgstore: pending_rx2: %w", err)
 		}
 	}
 	if len(pendingDownlink) > 0 {
-		ses.Pending = &engine.PendingDownlink{}
-		if err := json.Unmarshal(pendingDownlink, ses.Pending); err != nil {
+		session.Pending = &engine.PendingDownlink{}
+		if err := json.Unmarshal(pendingDownlink, session.Pending); err != nil {
 			return nil, fmt.Errorf("pgstore: pending_downlink: %w", err)
 		}
 	}
 
-	if err := decodeMACState(macStateRaw, &ses); err != nil {
+	if err := decodeMACState(macStateRaw, &session); err != nil {
 		return nil, err
 	}
 
-	ses.KeyEpoch = uint32(keyEpoch)
-	ses.FCntUp = uint32(fCntUp)
-	ses.FCntDown = uint32(fCntDown)
-	ses.AFCntDown = uint32(afCntDown)
-	ses.Rx2FrequencyHz = uint32(rx2FrequencyHz)
-	ses.LastFrequencyHz = uint32(lastFreqHz)
-	ses.Battery = byte(battery)
-	ses.Margin = int8(margin)
+	session.KeyEpoch = uint32(keyEpoch)
+	session.FCntUp = uint32(fCntUp)
+	session.FCntDown = uint32(fCntDown)
+	session.AFCntDown = uint32(afCntDown)
+	session.Rx2FrequencyHz = uint32(rx2FrequencyHz)
+	session.LastFrequencyHz = uint32(lastFreqHz)
+	session.Battery = byte(battery)
+	session.Margin = int8(margin)
 	if lastUplinkAt != nil {
-		ses.LastUplinkAt = *lastUplinkAt
+		session.LastUplinkAt = *lastUplinkAt
 	}
 	if lastDownlinkAt != nil {
-		ses.LastDownlinkAt = *lastDownlinkAt
+		session.LastDownlinkAt = *lastDownlinkAt
 	}
-	return &ses, nil
+	return &session, nil
 }
 
 // SaveSession implements engine.SessionRepo.
-func (s *Store) SaveSession(ctx context.Context, ses *engine.Session) error {
-	pendingADR, err := optionalJSON(ses.PendingADR)
+func (s *Store) SaveSession(ctx context.Context, session *engine.Session) error {
+	pendingADR, err := optionalJSON(session.PendingADR)
 	if err != nil {
 		return fmt.Errorf("pgstore: pending_adr: %w", err)
 	}
-	pendingRX2, err := optionalJSON(ses.PendingRX2)
+	pendingRX2, err := optionalJSON(session.PendingRX2)
 	if err != nil {
 		return fmt.Errorf("pgstore: pending_rx2: %w", err)
 	}
-	pendingDownlink, err := optionalJSON(ses.Pending)
+	pendingDownlink, err := optionalJSON(session.Pending)
 	if err != nil {
 		return fmt.Errorf("pgstore: pending_downlink: %w", err)
 	}
 
-	macState, err := encodeMACState(ses)
+	macState, err := encodeMACState(session)
 	if err != nil {
 		return err
 	}
 
 	var lastUplinkAt, lastDownlinkAt any
-	if !ses.LastUplinkAt.IsZero() {
-		lastUplinkAt = ses.LastUplinkAt
+	if !session.LastUplinkAt.IsZero() {
+		lastUplinkAt = session.LastUplinkAt
 	}
-	if !ses.LastDownlinkAt.IsZero() {
-		lastDownlinkAt = ses.LastDownlinkAt
+	if !session.LastDownlinkAt.IsZero() {
+		lastDownlinkAt = session.LastDownlinkAt
 	}
 	var gatewayID any
-	if ses.LastGatewayID != (lorawan.EUI64{}) {
-		gatewayID = euiText(ses.LastGatewayID)
+	if session.LastGatewayID != (lorawan.EUI64{}) {
+		gatewayID = euiText(session.LastGatewayID)
 	}
 
 	_, err = s.pool.Exec(ctx, `
@@ -214,14 +214,14 @@ func (s *Store) SaveSession(ctx context.Context, ses *engine.Session) error {
 			last_data_rate_index  = EXCLUDED.last_data_rate_index,
 			mac_state             = EXCLUDED.mac_state,
 			updated_at            = now()`,
-		euiText(ses.DevEUI), devAddrText(ses.DevAddr), keyText(ses.NwkSKey), keyText(ses.AppSKey),
-		int64(ses.KeyEpoch), int64(ses.FCntUp), int64(ses.FCntDown), int64(ses.AFCntDown),
-		ses.Region, ses.DataRate, ses.TxPower, ses.NbTrans, ses.Rx1Delay, ses.Rx1DROffset,
-		ses.Rx2DataRate, int64(ses.Rx2FrequencyHz),
-		ses.AwaitingLinkADRAns, pendingADR, pendingRX2, pendingDownlink,
-		ses.HasDeviceStatus, int16(ses.Battery), int16(ses.Margin),
-		lastUplinkAt, lastDownlinkAt, ses.LastRSSI, ses.LastSNR,
-		gatewayID, int64(ses.LastFrequencyHz), ses.LastDataRateIndex, macState,
+		euiText(session.DevEUI), devAddrText(session.DevAddr), keyText(session.NwkSKey), keyText(session.AppSKey),
+		int64(session.KeyEpoch), int64(session.FCntUp), int64(session.FCntDown), int64(session.AFCntDown),
+		session.Region, session.DataRate, session.TxPower, session.NbTrans, session.Rx1Delay, session.Rx1DROffset,
+		session.Rx2DataRate, int64(session.Rx2FrequencyHz),
+		session.AwaitingLinkADRAns, pendingADR, pendingRX2, pendingDownlink,
+		session.HasDeviceStatus, int16(session.Battery), int16(session.Margin),
+		lastUplinkAt, lastDownlinkAt, session.LastRSSI, session.LastSNR,
+		gatewayID, int64(session.LastFrequencyHz), session.LastDataRateIndex, macState,
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore: save session: %w", err)

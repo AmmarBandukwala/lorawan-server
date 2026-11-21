@@ -129,7 +129,7 @@ func (e *Engine) handleJoinRequest(ctx context.Context, frame gateway.UplinkFram
 		epoch = prev.KeyEpoch + 1
 	}
 
-	ses := &Session{
+	session := &Session{
 		DevEUI:            dev.DevEUI,
 		DevAddr:           devAddr,
 		NwkSKey:           nwkSKey,
@@ -149,10 +149,10 @@ func (e *Engine) handleJoinRequest(ctx context.Context, frame gateway.UplinkFram
 		LastFrequencyHz:   frame.FrequencyHz,
 		LastDataRateIndex: frame.DataRateIndex,
 	}
-	if ses.Rx2DataRate == 0 {
-		ses.Rx2DataRate = UseRegionDefault
+	if session.Rx2DataRate == 0 {
+		session.Rx2DataRate = UseRegionDefault
 	}
-	if err := e.store.Sessions.SaveSession(ctx, ses); err != nil {
+	if err := e.store.Sessions.SaveSession(ctx, session); err != nil {
 		return fmt.Errorf("engine: save session: %w", err)
 	}
 

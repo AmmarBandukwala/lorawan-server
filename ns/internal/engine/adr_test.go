@@ -231,19 +231,19 @@ func TestNBTransFor(t *testing.T) {
 // TestRecordUplinkHistoryBoundsTheWindow checks both halves of the ring: it must
 // grow to the window size and then hold there, keeping the newest samples.
 func TestRecordUplinkHistoryBoundsTheWindow(t *testing.T) {
-	var ses Session
-	ses.DataRate = 3
+	var session Session
+	session.DataRate = 3
 	for i := 0; i < 30; i++ {
-		recordUplinkHistory(&ses, uint32(i+1), float64(i))
+		recordUplinkHistory(&session, uint32(i+1), float64(i))
 	}
-	if len(ses.UplinkHistory) != ADRHistorySize {
-		t.Fatalf("history holds %d samples, want %d", len(ses.UplinkHistory), ADRHistorySize)
+	if len(session.UplinkHistory) != ADRHistorySize {
+		t.Fatalf("history holds %d samples, want %d", len(session.UplinkHistory), ADRHistorySize)
 	}
-	if ses.UplinkHistory[0].FCnt != 11 || ses.UplinkHistory[ADRHistorySize-1].FCnt != 30 {
+	if session.UplinkHistory[0].FCnt != 11 || session.UplinkHistory[ADRHistorySize-1].FCnt != 30 {
 		t.Errorf("window holds counters %d..%d, want 11..30",
-			ses.UplinkHistory[0].FCnt, ses.UplinkHistory[ADRHistorySize-1].FCnt)
+			session.UplinkHistory[0].FCnt, session.UplinkHistory[ADRHistorySize-1].FCnt)
 	}
-	if ses.UplinkHistory[0].DataRate != 3 {
+	if session.UplinkHistory[0].DataRate != 3 {
 		t.Error("a sample must record the data rate the uplink arrived on")
 	}
 }

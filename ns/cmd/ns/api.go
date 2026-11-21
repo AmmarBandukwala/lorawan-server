@@ -267,47 +267,47 @@ func (s *apiServer) handleSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	ses, err := s.eng.Session(r.Context(), devEUI)
+	session, err := s.eng.Session(r.Context(), devEUI)
 	if err != nil {
 		s.writeEngineError(w, devEUI, err)
 		return
 	}
 	view := sessionResponse{
 		DevEUI:         devEUI.String(),
-		DevAddr:        ses.DevAddr.String(),
-		Region:         ses.Region,
-		FCntUp:         ses.FCntUp,
-		FCntDown:       ses.FCntDown,
-		DataRate:       ses.DataRate,
-		TxPowerIndex:   ses.TxPower,
-		NbTrans:        ses.NbTrans,
-		ADR:            ses.LastADRBit,
-		Rx1Delay:       ses.Rx1Delay,
-		Rx1DROffset:    ses.Rx1DROffset,
-		Rx2FrequencyHz: ses.Rx2FrequencyHz,
-		Rx2DataRate:    ses.Rx2DataRate,
-		DutyCycle:      ses.DutyCycle,
-		LastRSSI:       ses.LastRSSI,
-		LastSNR:        ses.LastSNR,
+		DevAddr:        session.DevAddr.String(),
+		Region:         session.Region,
+		FCntUp:         session.FCntUp,
+		FCntDown:       session.FCntDown,
+		DataRate:       session.DataRate,
+		TxPowerIndex:   session.TxPower,
+		NbTrans:        session.NbTrans,
+		ADR:            session.LastADRBit,
+		Rx1Delay:       session.Rx1Delay,
+		Rx1DROffset:    session.Rx1DROffset,
+		Rx2FrequencyHz: session.Rx2FrequencyHz,
+		Rx2DataRate:    session.Rx2DataRate,
+		DutyCycle:      session.DutyCycle,
+		LastRSSI:       session.LastRSSI,
+		LastSNR:        session.LastSNR,
 	}
-	if !ses.LastUplinkAt.IsZero() {
-		at := ses.LastUplinkAt
+	if !session.LastUplinkAt.IsZero() {
+		at := session.LastUplinkAt
 		view.LastUplinkAt = &at
 	}
-	if ses.HasDeviceStatus {
-		battery, margin := int(ses.Battery), int(ses.Margin)
+	if session.HasDeviceStatus {
+		battery, margin := int(session.Battery), int(session.Margin)
 		view.Battery, view.MarginDB = &battery, &margin
 	}
-	if ses.Pending != nil {
-		pending := pendingDownlinkResponse{Confirmed: ses.Pending.Confirmed}
-		if ses.Pending.FPort != nil {
-			fPort := int(*ses.Pending.FPort)
+	if session.Pending != nil {
+		pending := pendingDownlinkResponse{Confirmed: session.Pending.Confirmed}
+		if session.Pending.FPort != nil {
+			fPort := int(*session.Pending.FPort)
 			pending.FPort = &fPort
 		}
-		if len(ses.Pending.FRMPayload) > 0 {
-			pending.Data = hex.EncodeToString(ses.Pending.FRMPayload)
+		if len(session.Pending.FRMPayload) > 0 {
+			pending.Data = hex.EncodeToString(session.Pending.FRMPayload)
 		}
-		pending.MACCommands = len(ses.Pending.MACCommands)
+		pending.MACCommands = len(session.Pending.MACCommands)
 		view.Pending = &pending
 	}
 	writeJSON(w, http.StatusOK, view)

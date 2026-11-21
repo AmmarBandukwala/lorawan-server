@@ -25,14 +25,14 @@ import (
 // FOpts holds at most 15 bytes, so a session with more outstanding requests than
 // fit sends them in order and the rest on the following downlinks. That is why
 // this returns a set rather than trying to include everything at once.
-func (e *Engine) outstandingRequests(ses *Session) (lorawan.MACCommandSet, error) {
+func (e *Engine) outstandingRequests(session *Session) (lorawan.MACCommandSet, error) {
 	var out lorawan.MACCommandSet
 	add := func(cid lorawan.CID, p []byte) { out = append(out, lorawan.MACCommand{CID: cid, Payload: p}) }
 
-	if req := ses.PendingADR; req != nil && ses.LinkADRRetries <= e.cfg.LinkADRMaxRetries {
+	if req := session.PendingADR; req != nil && session.LinkADRRetries <= e.cfg.LinkADRMaxRetries {
 		add(lorawan.CIDLinkADR, req.payload().Marshal())
 	}
-	if req := ses.PendingRX2; req != nil {
+	if req := session.PendingRX2; req != nil {
 		// OptNeg is set to 1 in the RXParamSetupReq DLSettings: in 1.0.3 that
 		// bit is RFU and devices expect it set, and a 1.1 device reads it as
 		// the OptNeg flag.
@@ -45,22 +45,22 @@ func (e *Engine) outstandingRequests(ses *Session) (lorawan.MACCommandSet, error
 		}
 		add(lorawan.CIDRXParamSetup, p)
 	}
-	if req := ses.PendingDutyCycle; req != nil {
+	if req := session.PendingDutyCycle; req != nil {
 		add(lorawan.CIDDutyCycle,
 			lorawan.DutyCycleReqPayload{MaxDCycle: byte(req.MaxDutyCycleIndex)}.Marshal())
 	}
-	if req := ses.PendingTXParams; req != nil {
+	if req := session.PendingTXParams; req != nil {
 		add(lorawan.CIDTXParamSetup, lorawan.TXParamSetupReqPayload{
 			UplinkDwellTime:   req.UplinkDwell400,
 			DownlinkDwellTime: req.DownlinkDwell400,
 			MaxEIRP:           byte(req.MaxEIRPIndex),
 		}.Marshal())
 	}
-	if req := ses.PendingRX1Delay; req != nil {
+	if req := session.PendingRX1Delay; req != nil {
 		add(lorawan.CIDRXTimingSetup,
 			lorawan.RXTimingSetupReqPayload{Delay: byte(req.DelaySeconds)}.Marshal())
 	}
-	if req := ses.PendingChannel; req != nil {
+	if req := session.PendingChannel; req != nil {
 		p, err := lorawan.NewChannelReqPayload{
 			ChIndex:   byte(req.Index),
 			Frequency: req.FrequencyHz,
@@ -101,26 +101,26 @@ func withoutRepeats(cmds, precedence lorawan.MACCommandSet) lorawan.MACCommandSe
 }
 
 // recordUplinkHistory appends one ADR sample and keeps the window bounded.
-func recordUplinkHistory(ses *Session, fCnt uint32, snr float64) {
-	ses.UplinkHistory = append(ses.UplinkHistory, UplinkHistoryItem{
+func recordUplinkHistory(session *Session, fCnt uint32, snr float64) {
+	session.UplinkHistory = append(session.UplinkHistory, UplinkHistoryItem{
 		FCnt:         fCnt,
 		SNR:          snr,
-		DataRate:     ses.DataRate,
-		TxPowerIndex: ses.TxPower,
+		DataRate:     session.DataRate,
+		TxPowerIndex: session.TxPower,
 	})
-	if len(ses.UplinkHistory) > ADRHistorySize {
+	if len(session.UplinkHistory) > ADRHistorySize {
 		// Copying the tail into the same backing array avoids allocating on
 		// every uplink of every device once the window is full.
-		n := len(ses.UplinkHistory)
-		ses.UplinkHistory = append(ses.UplinkHistory[:0], ses.UplinkHistory[n-ADRHistorySize:]...)
+		n := len(session.UplinkHistory)
+		session.UplinkHistory = append(session.UplinkHistory[:0], session.UplinkHistory[n-ADRHistorySize:]...)
 	}
 }
 
 // channelMask returns the device's mask, falling back to the band defaults when
 // the session has never been given one.
-func (e *Engine) channelMask(ses *Session, reg region.Region) region.ChannelMask {
-	if len(ses.ChannelMask) == reg.ChannelCount() {
-		return ses.ChannelMask
+func (e *Engine) channelMask(session *Session, reg region.Region) region.ChannelMask {
+	if len(session.ChannelMask) == reg.ChannelCount() {
+		return session.ChannelMask
 	}
 	return reg.DefaultChannelMask()
 }
@@ -171,14 +171,14 @@ func adrBounds(reg region.Region, dev *Device, mask region.ChannelMask) (minDR, 
 // band plan with a warning rather than failing the uplink: dropping live traffic
 // because of a bad row in a table is worse than a device running on the default
 // plan.
-func (e *Engine) deviceRegion(ses *Session, reg region.Region) region.Region {
-	if len(ses.UserChannels) == 0 {
+func (e *Engine) deviceRegion(session *Session, reg region.Region) region.Region {
+	if len(session.UserChannels) == 0 {
 		return reg
 	}
-	layered, err := region.WithUserChannels(reg, ses.UserChannels)
+	layered, err := region.WithUserChannels(reg, session.UserChannels)
 	if err != nil {
 		e.log.Warn("ignoring the device's dynamic channels; using the band plan",
-			"dev_eui", ses.DevEUI, "region", reg.CommonName(), "err", err)
+			"dev_eui", session.DevEUI, "region", reg.CommonName(), "err", err)
 		return reg
 	}
 	return layered
@@ -188,9 +188,9 @@ func (e *Engine) deviceRegion(ses *Session, reg region.Region) region.Region {
 // it does not queue a downlink: an outstanding request rides along on the next
 // window the device opens, and is repeated until answered.
 func (e *Engine) setRequest(ctx context.Context, devEUI lorawan.EUI64,
-	mutate func(ses *Session) error) error {
+	mutate func(session *Session) error) error {
 
-	ses, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
+	session, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
 	if errors.Is(err, ErrNotFound) {
 		// Wrapping rather than replacing: a caller must be able to tell "this
 		// device has never joined" from an unexpected failure with errors.Is, and
@@ -201,10 +201,10 @@ func (e *Engine) setRequest(ctx context.Context, devEUI lorawan.EUI64,
 	if err != nil {
 		return err
 	}
-	if err := mutate(ses); err != nil {
+	if err := mutate(session); err != nil {
 		return err
 	}
-	return e.store.Sessions.SaveSession(ctx, ses)
+	return e.store.Sessions.SaveSession(ctx, session)
 }
 
 // RequestDutyCycle asks the device to limit its own airtime. The index is the
@@ -214,8 +214,8 @@ func (e *Engine) RequestDutyCycle(ctx context.Context, devEUI lorawan.EUI64, max
 	if maxDutyCycleIndex < 0 || maxDutyCycleIndex > 15 {
 		return fmt.Errorf("engine: duty-cycle index %d outside the protocol range 0..15", maxDutyCycleIndex)
 	}
-	return e.setRequest(ctx, devEUI, func(ses *Session) error {
-		ses.PendingDutyCycle = &DutyCycleRequest{MaxDutyCycleIndex: maxDutyCycleIndex}
+	return e.setRequest(ctx, devEUI, func(session *Session) error {
+		session.PendingDutyCycle = &DutyCycleRequest{MaxDutyCycleIndex: maxDutyCycleIndex}
 		return nil
 	})
 }
@@ -229,8 +229,8 @@ func (e *Engine) RequestTXParams(ctx context.Context, devEUI lorawan.EUI64,
 	if maxEIRPIndex < 0 || maxEIRPIndex > 15 {
 		return fmt.Errorf("engine: max EIRP index %d outside the protocol range 0..15", maxEIRPIndex)
 	}
-	return e.setRequest(ctx, devEUI, func(ses *Session) error {
-		reg, err := e.regionFor(ses.Region)
+	return e.setRequest(ctx, devEUI, func(session *Session) error {
+		reg, err := e.regionFor(session.Region)
 		if err != nil {
 			return err
 		}
@@ -238,7 +238,7 @@ func (e *Engine) RequestTXParams(ctx context.Context, devEUI lorawan.EUI64,
 			return fmt.Errorf("engine: %s has no dwell-time restriction, so TXParamSetupReq is not applicable",
 				reg.CommonName())
 		}
-		ses.PendingTXParams = &TXParamsRequest{
+		session.PendingTXParams = &TXParamsRequest{
 			UplinkDwell400:   uplinkDwell400,
 			DownlinkDwell400: downlinkDwell400,
 			MaxEIRPIndex:     maxEIRPIndex,
@@ -254,8 +254,8 @@ func (e *Engine) RequestRX1Delay(ctx context.Context, devEUI lorawan.EUI64, dela
 	if delaySeconds < 1 || delaySeconds > 15 {
 		return fmt.Errorf("engine: RX1 delay %d s outside the protocol range 1..15", delaySeconds)
 	}
-	return e.setRequest(ctx, devEUI, func(ses *Session) error {
-		ses.PendingRX1Delay = &RX1DelayRequest{DelaySeconds: delaySeconds}
+	return e.setRequest(ctx, devEUI, func(session *Session) error {
+		session.PendingRX1Delay = &RX1DelayRequest{DelaySeconds: delaySeconds}
 		return nil
 	})
 }
@@ -269,8 +269,8 @@ func (e *Engine) RequestRX1Delay(ctx context.Context, devEUI lorawan.EUI64, dela
 func (e *Engine) RequestNewChannel(ctx context.Context, devEUI lorawan.EUI64,
 	index int, frequencyHz uint32, minDataRate, maxDataRate int) error {
 
-	return e.setRequest(ctx, devEUI, func(ses *Session) error {
-		reg, err := e.regionFor(ses.Region)
+	return e.setRequest(ctx, devEUI, func(session *Session) error {
+		reg, err := e.regionFor(session.Region)
 		if err != nil {
 			return err
 		}
@@ -312,7 +312,7 @@ func (e *Engine) RequestNewChannel(ctx context.Context, devEUI lorawan.EUI64,
 			}
 		}
 
-		ses.PendingChannel = &ChannelRequest{
+		session.PendingChannel = &ChannelRequest{
 			Index:       index,
 			FrequencyHz: frequencyHz,
 			MinDataRate: minDataRate,
@@ -337,72 +337,72 @@ func maxTxPowerIndex(reg region.Region, dev *Device) int {
 // It never changes the session's radio settings: those move to the requested
 // values only when the device's LinkADRAns confirms them, so the server cannot
 // end up believing a device is running a data rate it refused.
-func (e *Engine) applyADR(ctx context.Context, dev *Device, ses *Session, reg region.Region) {
+func (e *Engine) applyADR(ctx context.Context, dev *Device, session *Session, reg region.Region) {
 	// The counter advances whatever else happens, because what it measures is
 	// "uplinks since we last spoke about data rate".
-	ses.ADRAckCnt++
+	session.ADRAckCnt++
 
-	if dev.DisableADR || !ses.LastADRBit {
+	if dev.DisableADR || !session.LastADRBit {
 		return
 	}
 	// One request at a time: an unanswered LinkADRReq is already being re-sent,
 	// and re-deciding on every uplink would churn the parameters.
-	if ses.PendingADR != nil {
+	if session.PendingADR != nil {
 		return
 	}
 
-	mask := e.channelMask(ses, reg)
+	mask := e.channelMask(session, reg)
 	minDR, maxDR := adrBounds(reg, dev, mask)
 	decision := adrDecide(adrInput{
 		Region:             reg,
 		Enabled:            true,
-		DataRate:           ses.DataRate,
-		TxPowerIndex:       ses.TxPower,
-		NbTrans:            ses.NbTrans,
+		DataRate:           session.DataRate,
+		TxPowerIndex:       session.TxPower,
+		NbTrans:            session.NbTrans,
 		MaxTxPowerIndex:    maxTxPowerIndex(reg, dev),
 		MaxDataRate:        maxDR,
 		InstallationMargin: e.cfg.ADRInstallationMargin,
-		History:            ses.UplinkHistory,
+		History:            session.UplinkHistory,
 	})
 
 	switch {
 	case decision.Changed:
-		if ses.LinkADRRetries >= e.cfg.LinkADRMaxRetries {
+		if session.LinkADRRetries >= e.cfg.LinkADRMaxRetries {
 			e.recordEvent(ctx, Event{
-				Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+				Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 				Reason: ReasonADRAbandoned,
 				Detail: fmt.Sprintf("LinkADRReq unanswered after %d attempts; leaving DR%d TX%d",
-					ses.LinkADRRetries, ses.DataRate, ses.TxPower),
+					session.LinkADRRetries, session.DataRate, session.TxPower),
 			})
-			ses.ADRAckCnt = 0
+			session.ADRAckCnt = 0
 			return
 		}
-		if err := e.queueLinkADR(ses, reg, mask, decision.DataRate, decision.TxPowerIndex, decision.NbTrans); err != nil {
-			e.log.Warn("cannot build the LinkADRReq that ADR decided on", "dev_eui", ses.DevEUI, "err", err)
+		if err := e.queueLinkADR(session, reg, mask, decision.DataRate, decision.TxPowerIndex, decision.NbTrans); err != nil {
+			e.log.Warn("cannot build the LinkADRReq that ADR decided on", "dev_eui", session.DevEUI, "err", err)
 			return
 		}
-		ses.ADRAckCnt = 0
+		session.ADRAckCnt = 0
 		e.recordEvent(ctx, Event{
-			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+			Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 			Reason: ReasonADRDecision,
 			Detail: fmt.Sprintf("%s; asking for DR%d TX%d NbTrans%d (allowed DR%d..DR%d)",
 				decision.Reason, decision.DataRate, decision.TxPowerIndex, decision.NbTrans, minDR, maxDR),
 		})
 
-	case ses.ADRAckCnt >= e.cfg.ADRACKLimit+e.cfg.ADRACKDelay:
+	case session.ADRAckCnt >= e.cfg.ADRACKLimit+e.cfg.ADRACKDelay:
 		// Nothing needs to change, but the device has an ADR counter of its own
 		// that makes it fall back to a lower data rate when the network stops
 		// answering. A LinkADRReq confirming the current settings resets it.
-		if err := e.queueLinkADR(ses, reg, mask, ses.DataRate, ses.TxPower, ses.NbTrans); err != nil {
-			e.log.Warn("cannot build the ADR keep-alive LinkADRReq", "dev_eui", ses.DevEUI, "err", err)
+		if err := e.queueLinkADR(session, reg, mask, session.DataRate, session.TxPower, session.NbTrans); err != nil {
+			e.log.Warn("cannot build the ADR keep-alive LinkADRReq", "dev_eui", session.DevEUI, "err", err)
 			return
 		}
-		ses.ADRAckCnt = 0
+		session.ADRAckCnt = 0
 		e.recordEvent(ctx, Event{
-			Kind: EventMAC, DevEUI: ses.DevEUI, DevAddr: ses.DevAddr,
+			Kind: EventMAC, DevEUI: session.DevEUI, DevAddr: session.DevAddr,
 			Reason: ReasonADRKeepalive,
 			Detail: fmt.Sprintf("%d uplinks without a LinkADRReq; re-sending the current DR%d TX%d to reset the device's ADR counter",
-				e.cfg.ADRACKLimit+e.cfg.ADRACKDelay, ses.DataRate, ses.TxPower),
+				e.cfg.ADRACKLimit+e.cfg.ADRACKDelay, session.DataRate, session.TxPower),
 		})
 	}
 }
@@ -410,7 +410,7 @@ func (e *Engine) applyADR(ctx context.Context, dev *Device, ses *Session, reg re
 // queueLinkADR stores an outstanding LinkADRReq. The mask carried is the one the
 // device is running, so a data-rate change never silently rewrites a channel
 // plan that someone configured by hand.
-func (e *Engine) queueLinkADR(ses *Session, reg region.Region, mask region.ChannelMask,
+func (e *Engine) queueLinkADR(session *Session, reg region.Region, mask region.ChannelMask,
 	dataRate, txPower, nbTrans int) error {
 
 	dr, err := reg.DataRate(dataRate)
@@ -429,7 +429,7 @@ func (e *Engine) queueLinkADR(ses *Session, reg region.Region, mask region.Chann
 		return fmt.Errorf("engine: NbTrans must be 1..15, got %d", nbTrans)
 	}
 
-	ses.PendingADR = &ADRRequest{
+	session.PendingADR = &ADRRequest{
 		DataRate: dataRate,
 		TxPower:  txPower,
 		NbTrans:  nbTrans,
@@ -438,6 +438,6 @@ func (e *Engine) queueLinkADR(ses *Session, reg region.Region, mask region.Chann
 		// the other blocks untouched.
 		ChMaskCntl: 0,
 	}
-	ses.AwaitingLinkADRAns = true
+	session.AwaitingLinkADRAns = true
 	return nil
 }

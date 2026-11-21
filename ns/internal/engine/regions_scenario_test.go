@@ -71,9 +71,9 @@ func TestUS915JoinPlacesRX1OnTheMappedChannel(t *testing.T) {
 
 	// The session must remember the band it joined under, because a later change
 	// to NS_REGION must not re-interpret an existing session.
-	ses := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
-	if ses.Region != "US915" {
-		t.Errorf("session region = %q, want US915", ses.Region)
+	session := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
+	if session.Region != "US915" {
+		t.Errorf("session region = %q, want US915", session.Region)
 	}
 	_ = simDev
 }
@@ -91,8 +91,8 @@ func TestUS915UplinkAndDownlinkRoundTrip(t *testing.T) {
 
 	// FCntUp is the next counter the engine expects, so after accepting the
 	// device's first frame (counter 0) it reads 1.
-	if ses := env.Session(devEUI); ses.FCntUp != 1 {
-		t.Errorf("FCntUp = %d, want 1", ses.FCntUp)
+	if session := env.Session(devEUI); session.FCntUp != 1 {
+		t.Errorf("FCntUp = %d, want 1", session.FCntUp)
 	}
 
 	if err := env.Engine.EnqueueDownlink(ctx, devEUI, 10, []byte("ack"), false); err != nil {
@@ -142,10 +142,10 @@ func TestUS915ADRCeepsToALoRa125Rate(t *testing.T) {
 		env.UplinkSNR(simDev, sim.UplinkOptions{FPort: 10, Payload: []byte{byte(i)}}, 15.0)
 	}
 
-	ses := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
-	if ses.DataRate > 3 {
+	session := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
+	if session.DataRate > 3 {
 		t.Errorf("ADR moved the device to DR%d; the ceiling for 125 kHz uplinks is DR3",
-			ses.DataRate)
+			session.DataRate)
 	}
 
 	// Confirm the band really does allow DR4, so the assertion above is about
@@ -180,9 +180,9 @@ func TestEveryBandJoinsAndHearsBack(t *testing.T) {
 			if len(frames) == 0 {
 				t.Fatalf("no join-accept scheduled on %s", name)
 			}
-			ses := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
-			if ses.Region != name {
-				t.Errorf("session region = %q, want %q", ses.Region, name)
+			session := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
+			if session.Region != name {
+				t.Errorf("session region = %q, want %q", session.Region, name)
 			}
 
 			// RX1 must land on the frequency the band maps the uplink to. Getting

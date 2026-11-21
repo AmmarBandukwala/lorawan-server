@@ -193,8 +193,8 @@ func run(regionName string, quiet bool) error {
 		frame(gwEUI, reg.CommonName(), statusAns, gateway.RxWindow1, uplinkFreq, uplinkDR)); err != nil {
 		return err
 	}
-	ses := mustSession(eng, ctx, devEUI)
-	step("DevStatusReq/Ans round trip: battery %d/255, margin %d dB", ses.Battery, ses.Margin)
+	session := mustSession(eng, ctx, devEUI)
+	step("DevStatusReq/Ans round trip: battery %d/255, margin %d dB", session.Battery, session.Margin)
 
 	if err := eng.RequestLinkADR(ctx, devEUI, adrTarget(reg), 2, 1, 0x00FF, 0); err != nil {
 		return err
@@ -211,9 +211,9 @@ func run(regionName string, quiet bool) error {
 		frame(gwEUI, reg.CommonName(), adrAns, gateway.RxWindow1, uplinkFreq, uplinkDR)); err != nil {
 		return err
 	}
-	ses = mustSession(eng, ctx, devEUI)
+	session = mustSession(eng, ctx, devEUI)
 	step("LinkADRReq/Ans round trip: session now DR%d, TX index %d, NbTrans %d",
-		ses.DataRate, ses.TxPower, ses.NbTrans)
+		session.DataRate, session.TxPower, session.NbTrans)
 
 	// --- replay attempts ----------------------------------------------------
 	replay, err := simDev.NextUplink(sim.UplinkOptions{FPort: 10, Payload: []byte("replay me")})
@@ -242,9 +242,9 @@ func run(regionName string, quiet bool) error {
 	step("replaying the original join-request is refused with %s", engine.ReasonDevNonceReplay)
 
 	// --- summary ------------------------------------------------------------
-	ses = mustSession(eng, ctx, devEUI)
+	session = mustSession(eng, ctx, devEUI)
 	fmt.Printf("\nsession: DevAddr %s, FCntUp %d, FCntDown %d, DR%d, region %s\n",
-		ses.DevAddr, ses.FCntUp, ses.FCntDown, ses.DataRate, ses.Region)
+		session.DevAddr, session.FCntUp, session.FCntDown, session.DataRate, session.Region)
 	fmt.Printf("traffic: %d uplink(s), %d downlink transmission(s), %d event(s)\n",
 		len(store.Uplinks()), len(store.Downlinks()), len(store.Events()))
 	if quiet {
@@ -291,11 +291,11 @@ func send(eng *engine.Engine, simDev *sim.Device, ctx context.Context, gwEUI lor
 }
 
 func mustSession(eng *engine.Engine, ctx context.Context, devEUI lorawan.EUI64) *engine.Session {
-	ses, err := eng.Session(ctx, devEUI)
+	session, err := eng.Session(ctx, devEUI)
 	if err != nil {
 		panic(fmt.Sprintf("session for %s: %v", devEUI, err))
 	}
-	return ses
+	return session
 }
 
 func mustParseEUI64(s string) lorawan.EUI64 {

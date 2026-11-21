@@ -105,7 +105,7 @@ func TestRoundTrip(t *testing.T) {
 
 	// --- sessions -------------------------------------------------------------
 
-	ses := &engine.Session{
+	session := &engine.Session{
 		DevEUI: devEUI, DevAddr: devAddr,
 		NwkSKey:  mustKey(t, "00112233445566778899aabbccddeeff"),
 		AppSKey:  mustKey(t, "ffeeddccbbaa99887766554433221100"),
@@ -117,7 +117,7 @@ func TestRoundTrip(t *testing.T) {
 		LastRSSI:     -71.5, LastSNR: 9.2,
 		LastGatewayID: mustEUI(t, "aa55555555555555"), LastFrequencyHz: 868100000,
 	}
-	if err := store.SaveSession(ctx, ses); err != nil {
+	if err := store.SaveSession(ctx, session); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 	byAddr, err := store.SessionByDevAddr(ctx, devAddr)
@@ -129,13 +129,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("SessionByDevEUI: %v", err)
 	}
 	for _, got := range []*engine.Session{byAddr, byEUI} {
-		if got.NwkSKey != ses.NwkSKey || got.AppSKey != ses.AppSKey ||
+		if got.NwkSKey != session.NwkSKey || got.AppSKey != session.AppSKey ||
 			got.FCntUp != 3 || got.FCntDown != 2 || got.AFCntDown != 2 ||
 			got.Rx2DataRate != engine.UseRegionDefault || got.Battery != 187 || got.Margin != -4 {
 			t.Errorf("session round trip = %+v", got)
 		}
-		if !got.LastUplinkAt.Equal(ses.LastUplinkAt) {
-			t.Errorf("LastUplinkAt = %v, want %v", got.LastUplinkAt, ses.LastUplinkAt)
+		if !got.LastUplinkAt.Equal(session.LastUplinkAt) {
+			t.Errorf("LastUplinkAt = %v, want %v", got.LastUplinkAt, session.LastUplinkAt)
 		}
 	}
 }

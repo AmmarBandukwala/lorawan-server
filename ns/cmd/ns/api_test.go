@@ -129,18 +129,18 @@ func TestAPIAcceptsTheRightToken(t *testing.T) {
 		t.Errorf("Content-Type = %q", ct)
 	}
 
-	ses, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
+	session, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
 	if err != nil {
 		t.Fatalf("SessionByDevEUI: %v", err)
 	}
-	if ses.Pending == nil {
+	if session.Pending == nil {
 		t.Fatal("the downlink was not queued")
 	}
-	if ses.Pending.FPort == nil || *ses.Pending.FPort != 10 {
-		t.Errorf("pending FPort = %v, want 10", ses.Pending.FPort)
+	if session.Pending.FPort == nil || *session.Pending.FPort != 10 {
+		t.Errorf("pending FPort = %v, want 10", session.Pending.FPort)
 	}
-	if string(ses.Pending.FRMPayload) != "\xde\xad\xbe\xef" {
-		t.Errorf("pending payload = % x, want deadbeef", ses.Pending.FRMPayload)
+	if string(session.Pending.FRMPayload) != "\xde\xad\xbe\xef" {
+		t.Errorf("pending payload = % x, want deadbeef", session.Pending.FRMPayload)
 	}
 }
 
@@ -257,12 +257,12 @@ func TestAPIDevStatusIsScheduled(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d body %s, want 202", rec.Code, rec.Body)
 	}
-	ses, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
+	session, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
 	if err != nil {
 		t.Fatalf("SessionByDevEUI: %v", err)
 	}
-	if ses.Pending == nil || len(ses.Pending.MACCommands) == 0 {
-		t.Errorf("no DevStatusReq was scheduled: %+v", ses.Pending)
+	if session.Pending == nil || len(session.Pending.MACCommands) == 0 {
+		t.Errorf("no DevStatusReq was scheduled: %+v", session.Pending)
 	}
 }
 
@@ -294,11 +294,11 @@ func TestAPIMethodNotAllowed(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed && rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 405 or 404", rec.Code)
 	}
-	ses, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
+	session, err := store.SessionByDevEUI(context.Background(), mustEUI(t, testDevEUIStr))
 	if err != nil {
 		t.Fatalf("SessionByDevEUI: %v", err)
 	}
-	if ses.Pending != nil {
+	if session.Pending != nil {
 		t.Error("a GET must not queue a downlink")
 	}
 }

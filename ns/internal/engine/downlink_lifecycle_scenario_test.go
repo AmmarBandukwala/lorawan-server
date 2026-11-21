@@ -68,7 +68,7 @@ func TestConfirmedDownlinkSurvivesUntilAcknowledged(t *testing.T) {
 	env.GW.Reset()
 	env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{0xbb}, Confirmed: true, ACK: true},
 		gateway.RxWindow1)
-	if ses := env.Session(devEUI); ses.Pending != nil {
+	if session := env.Session(devEUI); session.Pending != nil {
 		t.Error("the acknowledged frame must be dropped from the queue")
 	}
 }
@@ -88,7 +88,7 @@ func TestDownlinkRetriesAreCapped(t *testing.T) {
 		env.GW.Reset()
 		env.Uplink(simDev, sim.UplinkOptions{FPort: 1, Payload: []byte{byte(i)}}, gateway.RxWindow1)
 	}
-	if ses := env.Session(devEUI); ses.Pending != nil {
+	if session := env.Session(devEUI); session.Pending != nil {
 		t.Errorf("the frame is still queued after %d attempts", engine.MaxDownlinkAttempts)
 	}
 	if len(env.Store.EventsWithReason("downlink_abandoned")) != 1 {

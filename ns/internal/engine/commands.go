@@ -20,7 +20,7 @@ func (e *Engine) EnqueueDownlink(ctx context.Context, devEUI lorawan.EUI64, fPor
 	if fPort == 0 {
 		return errors.New("engine: FPort 0 is reserved for MAC commands")
 	}
-	return e.setPending(ctx, devEUI, func(ses *Session) (*PendingDownlink, error) {
+	return e.setPending(ctx, devEUI, func(session *Session) (*PendingDownlink, error) {
 		port := fPort
 		return &PendingDownlink{
 			FPort:      &port,
@@ -51,8 +51,8 @@ func (e *Engine) RequestDeviceStatus(ctx context.Context, devEUI lorawan.EUI64) 
 func (e *Engine) RequestLinkADR(ctx context.Context, devEUI lorawan.EUI64,
 	dataRate, txPower, nbRep int, chMask uint16, chMaskCntl byte) error {
 
-	return e.setPending(ctx, devEUI, func(ses *Session) (*PendingDownlink, error) {
-		reg, err := e.regionFor(ses.Region)
+	return e.setPending(ctx, devEUI, func(session *Session) (*PendingDownlink, error) {
+		reg, err := e.regionFor(session.Region)
 		if err != nil {
 			return nil, err
 		}
@@ -97,17 +97,17 @@ func (e *Engine) RequestLinkADR(ctx context.Context, devEUI lorawan.EUI64,
 			return nil, fmt.Errorf("engine: NbTrans must be 1..15, got %d", nbRep)
 		}
 
-		ses.PendingADR = &ADRRequest{
+		session.PendingADR = &ADRRequest{
 			DataRate:   dataRate,
 			TxPower:    txPower,
 			NbTrans:    nbRep,
 			ChMask:     chMask,
 			ChMaskCntl: chMaskCntl,
 		}
-		ses.AwaitingLinkADRAns = true
+		session.AwaitingLinkADRAns = true
 		return &PendingDownlink{
 			MACCommands: lorawan.MACCommandSet{
-				{CID: lorawan.CIDLinkADR, Payload: ses.PendingADR.payload().Marshal()},
+				{CID: lorawan.CIDLinkADR, Payload: session.PendingADR.payload().Marshal()},
 			},
 			CreatedAt: e.now(),
 		}, nil
@@ -118,8 +118,8 @@ func (e *Engine) RequestLinkADR(ctx context.Context, devEUI lorawan.EUI64,
 // frequency and data rate. The values are applied to the session when the
 // device answers with RXParamSetupAns.
 func (e *Engine) RequestRX2Params(ctx context.Context, devEUI lorawan.EUI64, frequencyHz uint32, dataRate int) error {
-	return e.setPending(ctx, devEUI, func(ses *Session) (*PendingDownlink, error) {
-		reg, err := e.regionFor(ses.Region)
+	return e.setPending(ctx, devEUI, func(session *Session) (*PendingDownlink, error) {
+		reg, err := e.regionFor(session.Region)
 		if err != nil {
 			return nil, err
 		}
@@ -137,7 +137,7 @@ func (e *Engine) RequestRX2Params(ctx context.Context, devEUI lorawan.EUI64, fre
 		if err != nil {
 			return nil, err
 		}
-		ses.PendingRX2 = &RX2Request{FrequencyHz: frequencyHz, DataRate: dataRate}
+		session.PendingRX2 = &RX2Request{FrequencyHz: frequencyHz, DataRate: dataRate}
 		return &PendingDownlink{
 			MACCommands: lorawan.MACCommandSet{{CID: lorawan.CIDRXParamSetup, Payload: payload}},
 			CreatedAt:   e.now(),
@@ -147,26 +147,26 @@ func (e *Engine) RequestRX2Params(ctx context.Context, devEUI lorawan.EUI64, fre
 
 // CancelPendingDownlink drops a queued downlink that has not been transmitted.
 func (e *Engine) CancelPendingDownlink(ctx context.Context, devEUI lorawan.EUI64) error {
-	ses, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
+	session, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
 	if err != nil {
 		return err
 	}
-	if ses.Pending == nil {
+	if session.Pending == nil {
 		return ErrNotFound
 	}
-	if ses.Pending.FCntDown != 0 {
+	if session.Pending.FCntDown != 0 {
 		return errors.New("engine: downlink already transmitted; it cannot be recalled")
 	}
-	ses.Pending = nil
-	return e.store.Sessions.SaveSession(ctx, ses)
+	session.Pending = nil
+	return e.store.Sessions.SaveSession(ctx, session)
 }
 
 // setPending loads a session, refuses to overwrite an existing pending frame
 // and stores whatever mutate returns.
 func (e *Engine) setPending(ctx context.Context, devEUI lorawan.EUI64,
-	mutate func(ses *Session) (*PendingDownlink, error)) error {
+	mutate func(session *Session) (*PendingDownlink, error)) error {
 
-	ses, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
+	session, err := e.store.Sessions.SessionByDevEUI(ctx, devEUI)
 	if errors.Is(err, ErrNotFound) {
 		// Wrapping rather than replacing: a caller must be able to tell "this
 		// device has never joined" from an unexpected failure with errors.Is, and
@@ -177,14 +177,14 @@ func (e *Engine) setPending(ctx context.Context, devEUI lorawan.EUI64,
 	if err != nil {
 		return err
 	}
-	if ses.Pending != nil {
+	if session.Pending != nil {
 		return ErrPendingDownlinkExists
 	}
 
-	pending, err := mutate(ses)
+	pending, err := mutate(session)
 	if err != nil {
 		return err
 	}
-	ses.Pending = pending
-	return e.store.Sessions.SaveSession(ctx, ses)
+	session.Pending = pending
+	return e.store.Sessions.SaveSession(ctx, session)
 }

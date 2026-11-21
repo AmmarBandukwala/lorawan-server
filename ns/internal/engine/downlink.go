@@ -24,24 +24,24 @@ type txPlan struct {
 // sent, so an uplink received in RX2 yields an RX2-only plan. RX1 can also be
 // unavailable when the band cannot map the uplink channel to a downlink channel
 // (for example US915 FSK uplink channels), in which case only RX2 is planned.
-func (e *Engine) dataWindows(reg region.Region, frame gateway.UplinkFrame, ses *Session) []txPlan {
+func (e *Engine) dataWindows(reg region.Region, frame gateway.UplinkFrame, session *Session) []txPlan {
 	def := reg.Defaults()
 
-	rx1Delay := ses.Rx1Delay
+	rx1Delay := session.Rx1Delay
 	if rx1Delay <= 0 {
 		rx1Delay = int(def.RX1Delay / time.Second)
 	}
 	// LoRaWAN 1.0.3: RX2 opens one second after RX1. When the device uses the
 	// regional RX1 delay, use the regional RX2 delay so both agree.
 	rx2Delay := rx1Delay + 1
-	if ses.Rx1Delay <= 0 && def.RX2Delay > 0 {
+	if session.Rx1Delay <= 0 && def.RX2Delay > 0 {
 		rx2Delay = int(def.RX2Delay / time.Second)
 	}
 
 	var plans []txPlan
 	if frame.RxWindow == gateway.RxWindow1 {
 		freq, errFreq := reg.RX1FrequencyHz(frame.FrequencyHz)
-		dr, errDR := reg.RX1DataRate(frame.DataRateIndex, ses.Rx1DROffset)
+		dr, errDR := reg.RX1DataRate(frame.DataRateIndex, session.Rx1DROffset)
 		if errFreq == nil && errDR == nil {
 			plans = append(plans, txPlan{
 				Window:        gateway.RxWindow1,
@@ -57,11 +57,11 @@ func (e *Engine) dataWindows(reg region.Region, frame gateway.UplinkFrame, ses *
 		}
 	}
 
-	rx2Freq := ses.Rx2FrequencyHz
+	rx2Freq := session.Rx2FrequencyHz
 	if rx2Freq == 0 {
 		rx2Freq = def.RX2FrequencyHz
 	}
-	rx2DR := ses.Rx2DataRate
+	rx2DR := session.Rx2DataRate
 	if rx2DR == UseRegionDefault {
 		rx2DR = def.RX2DataRate
 	}
@@ -119,21 +119,21 @@ func (e *Engine) joinWindows(reg region.Region, frame gateway.UplinkFrame) []txP
 // and a test needs it to drive a session past the limit.
 const MaxDownlinkAttempts = 8
 
-func allocateDownlinkFCnt(ses *Session, pending *PendingDownlink) uint32 {
-	if pending != nil && pending.FCntDown != 0 && pending.FCntDown == ses.FCntDown {
+func allocateDownlinkFCnt(session *Session, pending *PendingDownlink) uint32 {
+	if pending != nil && pending.FCntDown != 0 && pending.FCntDown == session.FCntDown {
 		pending.Attempts++
 		return pending.FCntDown
 	}
-	ses.FCntDown++
+	session.FCntDown++
 	if pending != nil {
-		pending.FCntDown = ses.FCntDown
+		pending.FCntDown = session.FCntDown
 		pending.Attempts++
 	}
-	return ses.FCntDown
+	return session.FCntDown
 }
 
 // buildDataDownlink encodes and secures a downlink data frame.
-func (e *Engine) buildDataDownlink(ses *Session, mtype lorawan.MType, fcntDown uint32,
+func (e *Engine) buildDataDownlink(session *Session, mtype lorawan.MType, fcntDown uint32,
 	fport *byte, frmPayload []byte, macs lorawan.MACCommandSet, ack bool) (*lorawan.PHYPayload, error) {
 
 	var fopts []byte
@@ -152,9 +152,9 @@ func (e *Engine) buildDataDownlink(ses *Session, mtype lorawan.MType, fcntDown u
 		MHDR: lorawan.MHDR{MType: mtype, Major: 0},
 		MAC: &lorawan.MACPayload{
 			FHDR: lorawan.FHDR{
-				DevAddr: ses.DevAddr,
+				DevAddr: session.DevAddr,
 				FCtrl: lorawan.FCtrl{
-					ADR:      ses.AwaitingLinkADRAns,
+					ADR:      session.AwaitingLinkADRAns,
 					ACK:      ack,
 					FOptsLen: byte(len(fopts)),
 				},
@@ -169,17 +169,17 @@ func (e *Engine) buildDataDownlink(ses *Session, mtype lorawan.MType, fcntDown u
 		phy.MAC.FPort = &port
 		phy.MAC.FRMPayload = append([]byte(nil), frmPayload...)
 
-		key := ses.AppSKey
+		key := session.AppSKey
 		if port == 0 {
 			// FPort 0 carries network MAC commands encrypted with NwkSKey.
-			key = ses.NwkSKey
+			key = session.NwkSKey
 		}
 		if err := phy.EncryptFRMPayload(key, lorawan.DirDownlink, fcntDown); err != nil {
 			return nil, fmt.Errorf("engine: encrypt FRMPayload: %w", err)
 		}
 	}
 
-	if err := phy.SetDataMIC(lorawan.DirDownlink, fcntDown, ses.NwkSKey); err != nil {
+	if err := phy.SetDataMIC(lorawan.DirDownlink, fcntDown, session.NwkSKey); err != nil {
 		return nil, fmt.Errorf("engine: MIC: %w", err)
 	}
 	return phy, nil

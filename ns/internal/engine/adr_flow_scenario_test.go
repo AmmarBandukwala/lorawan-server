@@ -59,9 +59,9 @@ func TestADRConvergesAndThenStops(t *testing.T) {
 	simDev, _ := env.Join()
 
 	// Park the device at the bottom of the band so there is somewhere to climb.
-	ses := env.Session(devEUI)
-	ses.DataRate, ses.TxPower, ses.NbTrans = 0, 0, 1
-	if err := env.Store.SaveSession(ctx, ses); err != nil {
+	session := env.Session(devEUI)
+	session.DataRate, session.TxPower, session.NbTrans = 0, 0, 1
+	if err := env.Store.SaveSession(ctx, session); err != nil {
 		t.Fatalf("SaveSession: %v", err)
 	}
 
@@ -133,16 +133,16 @@ func TestADRRespectsTheDeviceADRBit(t *testing.T) {
 		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true /* ADR clear */}, 15.0)
 	}
 
-	ses := env.Session(devEUI)
-	if ses.DataRate != before {
-		t.Errorf("DataRate = %d, want it left at %d", ses.DataRate, before)
+	session := env.Session(devEUI)
+	if session.DataRate != before {
+		t.Errorf("DataRate = %d, want it left at %d", session.DataRate, before)
 	}
-	if ses.PendingADR != nil {
-		t.Errorf("an ADR-off device was asked to change: %+v", ses.PendingADR)
+	if session.PendingADR != nil {
+		t.Errorf("an ADR-off device was asked to change: %+v", session.PendingADR)
 	}
 	// The measurements are still recorded: a device can turn ADR back on at any
 	// time, and the window should not start empty.
-	if len(ses.UplinkHistory) == 0 {
+	if len(session.UplinkHistory) == 0 {
 		t.Error("uplink history must be recorded even while ADR is off")
 	}
 }
@@ -168,8 +168,8 @@ func TestADRDisabledByDeviceProfile(t *testing.T) {
 	for i := 0; i < engine.ADRHistorySize; i++ {
 		env.UplinkSNR(simDev, sim.UplinkOptions{NoFPort: true, ADR: true}, 15.0)
 	}
-	if ses := env.Session(devEUI); ses.PendingADR != nil || ses.DataRate != before {
+	if session := env.Session(devEUI); session.PendingADR != nil || session.DataRate != before {
 		t.Errorf("DisableADR was ignored: DR%d (was %d) pending %+v",
-			ses.DataRate, before, ses.PendingADR)
+			session.DataRate, before, session.PendingADR)
 	}
 }

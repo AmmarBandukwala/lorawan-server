@@ -93,21 +93,21 @@ func TestNewChannelAppliesOnlyAfterTheDeviceAccepts(t *testing.T) {
 
 	// Until the answer arrives the channel must not be used: a device that
 	// refuses would otherwise be answered on a frequency it never opened.
-	if ses := env.Session(devEUI); len(ses.UserChannels) != 0 {
-		t.Errorf("the channel was applied before the answer: %+v", ses.UserChannels)
+	if session := env.Session(devEUI); len(session.UserChannels) != 0 {
+		t.Errorf("the channel was applied before the answer: %+v", session.UserChannels)
 	}
 
 	answer(t, env, simDev, lorawan.MACCommandSet{
 		{CID: lorawan.CIDNewChannel, Payload: []byte{0x03}}, // frequency OK, data rates OK
 	})
 
-	ses := env.Session(devEUI)
-	if ses.PendingChannel != nil {
-		t.Errorf("the request is still outstanding: %+v", ses.PendingChannel)
+	session := env.Session(devEUI)
+	if session.PendingChannel != nil {
+		t.Errorf("the request is still outstanding: %+v", session.PendingChannel)
 	}
-	ch, ok := ses.UserChannels[3]
+	ch, ok := session.UserChannels[3]
 	if !ok {
-		t.Fatalf("channel 3 was not recorded: %+v", ses.UserChannels)
+		t.Fatalf("channel 3 was not recorded: %+v", session.UserChannels)
 	}
 	if ch.FrequencyHz != 867700000 || !ch.Enabled || !ch.UserDefined {
 		t.Errorf("channel 3 = %+v", ch)
@@ -120,7 +120,7 @@ func TestNewChannelAppliesOnlyAfterTheDeviceAccepts(t *testing.T) {
 	// engine builds that view internally by layering the device's dynamic
 	// channels over the band plan; the same layering is available through the
 	// region package, which is what a caller outside the engine can check.
-	layered, err := region.WithUserChannels(testenv.MustRegion(t, "EU868"), ses.UserChannels)
+	layered, err := region.WithUserChannels(testenv.MustRegion(t, "EU868"), session.UserChannels)
 	if err != nil {
 		t.Fatalf("WithUserChannels: %v", err)
 	}
@@ -149,12 +149,12 @@ func TestNewChannelRefusalIsFinal(t *testing.T) {
 		{CID: lorawan.CIDNewChannel, Payload: []byte{0x00}}, // both bits cleared
 	})
 
-	ses := env.Session(devEUI)
-	if ses.PendingChannel != nil {
-		t.Errorf("a refused request must be dropped, not retried: %+v", ses.PendingChannel)
+	session := env.Session(devEUI)
+	if session.PendingChannel != nil {
+		t.Errorf("a refused request must be dropped, not retried: %+v", session.PendingChannel)
 	}
-	if len(ses.UserChannels) != 0 {
-		t.Errorf("a refused channel must not be added: %+v", ses.UserChannels)
+	if len(session.UserChannels) != 0 {
+		t.Errorf("a refused channel must not be added: %+v", session.UserChannels)
 	}
 	if countEventsWithReason(env, "new_channel_refused") != 1 {
 		t.Errorf("the refusal was not recorded: %+v", env.Store.Events())
@@ -190,8 +190,8 @@ func TestOutstandingRequestIsRepeatedUntilAnswered(t *testing.T) {
 	answer(t, env, simDev, lorawan.MACCommandSet{{CID: lorawan.CIDDutyCycle}})
 
 	// RP002 Table 13: index 4 is one sixteenth.
-	if ses := env.Session(devEUI); ses.DutyCycle != 1.0/16 {
-		t.Errorf("DutyCycle = %v, want 0.0625", ses.DutyCycle)
+	if session := env.Session(devEUI); session.DutyCycle != 1.0/16 {
+		t.Errorf("DutyCycle = %v, want 0.0625", session.DutyCycle)
 	}
 	if cmd, ok := findCommand(ask(t, env, simDev, sim.UplinkOptions{NoFPort: true}), lorawan.CIDDutyCycle); ok {
 		t.Errorf("the request was still sent after the answer: %+v", cmd)
@@ -218,13 +218,13 @@ func TestRX1DelayAppliesOnAnswer(t *testing.T) {
 	if len(cmd.Payload) != 1 || cmd.Payload[0] != 8 {
 		t.Errorf("RXTimingSetupReq payload = % x, want 08", cmd.Payload)
 	}
-	if ses := env.Session(devEUI); ses.Rx1Delay != before {
-		t.Errorf("RX1 delay changed before the answer: %d, was %d", ses.Rx1Delay, before)
+	if session := env.Session(devEUI); session.Rx1Delay != before {
+		t.Errorf("RX1 delay changed before the answer: %d, was %d", session.Rx1Delay, before)
 	}
 
 	answer(t, env, simDev, lorawan.MACCommandSet{{CID: lorawan.CIDRXTimingSetup}})
-	if ses := env.Session(devEUI); ses.Rx1Delay != 8 {
-		t.Errorf("Rx1Delay = %d, want 8", ses.Rx1Delay)
+	if session := env.Session(devEUI); session.Rx1Delay != 8 {
+		t.Errorf("Rx1Delay = %d, want 8", session.Rx1Delay)
 	}
 }
 
@@ -279,9 +279,9 @@ func TestUnexpectedAnswerIsRecordedNotApplied(t *testing.T) {
 		{CID: lorawan.CIDNewChannel, Payload: []byte{0x03}},
 	})
 
-	ses := env.Session(devEUI)
-	if len(ses.UserChannels) != 0 {
-		t.Errorf("an answer to no request added a channel: %+v", ses.UserChannels)
+	session := env.Session(devEUI)
+	if len(session.UserChannels) != 0 {
+		t.Errorf("an answer to no request added a channel: %+v", session.UserChannels)
 	}
 	if countEventsWithReason(env, "unexpected_mac_answer") != 1 {
 		t.Errorf("the stray answer was not recorded: %+v", env.Store.Events())

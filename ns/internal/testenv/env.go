@@ -178,11 +178,11 @@ func (env *Env) UplinkWire(wire []byte) error {
 func (env *Env) Session(devEUI lorawan.EUI64) *engine.Session {
 	env.t.Helper()
 
-	ses, err := env.Store.SessionByDevEUI(context.Background(), devEUI)
+	session, err := env.Store.SessionByDevEUI(context.Background(), devEUI)
 	if err != nil {
 		env.t.Fatalf("SessionByDevEUI: %v", err)
 	}
-	return ses
+	return session
 }
 
 // UplinkSNR feeds a device frame with a chosen signal-to-noise ratio. SNR is the

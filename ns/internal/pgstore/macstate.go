@@ -49,22 +49,22 @@ func (m macState) empty() bool {
 }
 
 // encodeMACState renders the session's MAC state, or nil when there is none.
-func encodeMACState(ses *engine.Session) ([]byte, error) {
+func encodeMACState(session *engine.Session) ([]byte, error) {
 	m := macState{
-		UplinkHistory:    ses.UplinkHistory,
-		ChannelMask:      ses.ChannelMask,
-		UserChannels:     ses.UserChannels,
-		ADRAckCnt:        ses.ADRAckCnt,
-		LinkADRRetries:   ses.LinkADRRetries,
-		LastADRBit:       ses.LastADRBit,
-		DutyCycle:        ses.DutyCycle,
-		MaxEIRPIndex:     ses.MaxEIRPIndex,
-		UplinkDwell400:   ses.UplinkDwell400,
-		DownlinkDwell400: ses.DownlinkDwell400,
-		PendingDutyCycle: ses.PendingDutyCycle,
-		PendingTXParams:  ses.PendingTXParams,
-		PendingRX1Delay:  ses.PendingRX1Delay,
-		PendingChannel:   ses.PendingChannel,
+		UplinkHistory:    session.UplinkHistory,
+		ChannelMask:      session.ChannelMask,
+		UserChannels:     session.UserChannels,
+		ADRAckCnt:        session.ADRAckCnt,
+		LinkADRRetries:   session.LinkADRRetries,
+		LastADRBit:       session.LastADRBit,
+		DutyCycle:        session.DutyCycle,
+		MaxEIRPIndex:     session.MaxEIRPIndex,
+		UplinkDwell400:   session.UplinkDwell400,
+		DownlinkDwell400: session.DownlinkDwell400,
+		PendingDutyCycle: session.PendingDutyCycle,
+		PendingTXParams:  session.PendingTXParams,
+		PendingRX1Delay:  session.PendingRX1Delay,
+		PendingChannel:   session.PendingChannel,
 	}
 	if m.empty() {
 		return nil, nil
@@ -79,7 +79,7 @@ func encodeMACState(ses *engine.Session) ([]byte, error) {
 // decodeMACState restores the document onto a session. A NULL column leaves the
 // session at its zero values, which is what a device that has never been touched
 // by the MAC engine should hold.
-func decodeMACState(raw []byte, ses *engine.Session) error {
+func decodeMACState(raw []byte, session *engine.Session) error {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -87,19 +87,19 @@ func decodeMACState(raw []byte, ses *engine.Session) error {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return fmt.Errorf("pgstore: decode mac_state: %w", err)
 	}
-	ses.UplinkHistory = m.UplinkHistory
-	ses.ChannelMask = m.ChannelMask
-	ses.UserChannels = m.UserChannels
-	ses.ADRAckCnt = m.ADRAckCnt
-	ses.LinkADRRetries = m.LinkADRRetries
-	ses.LastADRBit = m.LastADRBit
-	ses.DutyCycle = m.DutyCycle
-	ses.MaxEIRPIndex = m.MaxEIRPIndex
-	ses.UplinkDwell400 = m.UplinkDwell400
-	ses.DownlinkDwell400 = m.DownlinkDwell400
-	ses.PendingDutyCycle = m.PendingDutyCycle
-	ses.PendingTXParams = m.PendingTXParams
-	ses.PendingRX1Delay = m.PendingRX1Delay
-	ses.PendingChannel = m.PendingChannel
+	session.UplinkHistory = m.UplinkHistory
+	session.ChannelMask = m.ChannelMask
+	session.UserChannels = m.UserChannels
+	session.ADRAckCnt = m.ADRAckCnt
+	session.LinkADRRetries = m.LinkADRRetries
+	session.LastADRBit = m.LastADRBit
+	session.DutyCycle = m.DutyCycle
+	session.MaxEIRPIndex = m.MaxEIRPIndex
+	session.UplinkDwell400 = m.UplinkDwell400
+	session.DownlinkDwell400 = m.DownlinkDwell400
+	session.PendingDutyCycle = m.PendingDutyCycle
+	session.PendingTXParams = m.PendingTXParams
+	session.PendingRX1Delay = m.PendingRX1Delay
+	session.PendingChannel = m.PendingChannel
 	return nil
 }

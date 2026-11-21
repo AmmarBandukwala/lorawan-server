@@ -61,21 +61,21 @@ func TestOTAAJoinSchedulesBothWindows(t *testing.T) {
 		t.Errorf("join-accept RxDelay = %d, want 1 (EU868 RX1 delay)", ja1.RxDelay)
 	}
 
-	ses := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
-	if ses.DevAddr != simDev.DevAddr {
-		t.Errorf("server DevAddr %s != device DevAddr %s", ses.DevAddr, simDev.DevAddr)
+	session := env.Session(testenv.MustEUI64(t, testenv.DevEUI))
+	if session.DevAddr != simDev.DevAddr {
+		t.Errorf("server DevAddr %s != device DevAddr %s", session.DevAddr, simDev.DevAddr)
 	}
-	if !ses.NwkSKey.Equal(simDev.NwkSKey) {
+	if !session.NwkSKey.Equal(simDev.NwkSKey) {
 		t.Error("server and device disagree on NwkSKey")
 	}
-	if !ses.AppSKey.Equal(simDev.AppSKey) {
+	if !session.AppSKey.Equal(simDev.AppSKey) {
 		t.Error("server and device disagree on AppSKey")
 	}
-	if ses.FCntUp != 0 {
-		t.Errorf("fresh session FCntUp = %d, want 0 (next expected)", ses.FCntUp)
+	if session.FCntUp != 0 {
+		t.Errorf("fresh session FCntUp = %d, want 0 (next expected)", session.FCntUp)
 	}
-	if ses.Region != "EU868" {
-		t.Errorf("session region = %q, want EU868", ses.Region)
+	if session.Region != "EU868" {
+		t.Errorf("session region = %q, want EU868", session.Region)
 	}
 	if got := len(env.Store.EventsOfKind(engine.EventJoinAccept)); got != 1 {
 		t.Errorf("join_accept events = %d, want 1", got)
