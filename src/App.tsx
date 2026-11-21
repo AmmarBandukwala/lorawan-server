@@ -1,19 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Activity, ArrowDown, ArrowUpRight, Bell, Boxes, Braces, Check, ChevronDown,
   Menu, Radio, RadioTower, RefreshCw, Settings2, TriangleAlert,
 } from 'lucide-react'
-import { emptySnapshot, loadNetworkSnapshot, sameSettings, saveFacilitySettings, sectionKeys, type NetworkSnapshot } from './features/network/snapshot'
 import { ActivityItem, DeviceHeader, DeviceTable, Gateway, GatewayCard, PageHeadingAction, SettingsForm } from './features/network/components'
 import { DeviceConsole, DutyCyclePanel } from './features/network/DeviceConsole'
 import { GatewayConnectPanel, LiveGatewayCard, UnheardGatewayRow } from './features/network/Gateways'
 import { DeviceModels } from './features/network/DeviceModels'
 import { NetworkServerPanel } from './features/network/NetworkHealth'
-import { fetchRegions, fetchStatus, gatewaySummary } from './features/network/control/status'
-import type { NetworkStatus, RegionList } from './features/network/control/types'
 import { RegisterDeviceDialog } from './features/network/RegisterDeviceDialog'
-import { FALLBACK_REGIONS, REFRESH_INTERVAL_MS, UNASSIGNED_GROUP } from './features/network/constants'
-import { emptySettings, type ConnectionState, type Device, type DeviceFilter, type FacilitySettings, type GroupFilter, type View } from './features/network/types'
+import { gatewaySummary } from './features/network/control/status'
+import { UNASSIGNED_GROUP } from './features/network/constants'
+import type { Device, DeviceFilter, GroupFilter, View } from './features/network/types'
+import { useNetworkSnapshot } from './features/network/hooks/useNetworkSnapshot'
+import { useRegions } from './features/network/hooks/useRegions'
+import { useFacilitySettings } from './features/network/hooks/useFacilitySettings'
 import './App.css'
 
 const navigation: { name: View; icon: typeof Activity }[] = [
@@ -24,115 +25,31 @@ const navigation: { name: View; icon: typeof Activity }[] = [
 
 function App() {
   const [view, setView] = useState<View>('Overview')
-  // One snapshot instead of five states. The panels are refreshed as a unit, and
-  // holding them separately is what let the mount effect and the manual refresh
-  // grow two different sets of setters that could drift apart.
-  const [snapshot, setSnapshot] = useState<NetworkSnapshot>(emptySnapshot)
+
+  // The data layer lives in hooks, so what is left here is view state: which
+  // page, which filter, which device is open. useNetworkSnapshot owns the poll
+  // and which request supersedes which, useRegions the band list, and
+  // useFacilitySettings the save round trip with its own error and confirmation.
+  const {
+    snapshot, connection, loading, status,
+    settingsDraft, setSettingsDraft, refresh, patch,
+  } = useNetworkSnapshot()
   const { devices, overview, gateways, events, settings } = snapshot
-  const [settingsDraft, setSettingsDraft] = useState<FacilitySettings>(emptySettings)
+  const regions = useRegions()
+  const settingsSave = useFacilitySettings({
+    draft: settingsDraft, connection, setDraft: setSettingsDraft, patch,
+  })
+
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<DeviceFilter>('all')
   // 'all' means no group filter; any other value is a group label to match.
   const [group, setGroup] = useState<GroupFilter>('all')
   const [showAdd, setShowAdd] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
-  const [connection, setConnection] = useState<ConnectionState>('loading')
-  const [loading, setLoading] = useState(false)
-  const [settingsError, setSettingsError] = useState('')
-  const [settingsMessage, setSettingsMessage] = useState('')
-  const [settingsSaving, setSettingsSaving] = useState(false)
 
-  // The device whose live session is open, and the network server's own health
-  // report. Neither comes from the snapshot: the session is per-device state the
-  // list endpoint does not carry, and the health report is process state — which
-  // gateways are still sending PULL_DATA, how many webhook deliveries were
-  // dropped — that no table holds.
+  // The device whose live session is open. Not part of the snapshot: the session
+  // is per-device state the list endpoint does not carry.
   const [selected, setSelected] = useState<Device | null>(null)
-  const [status, setStatus] = useState<NetworkStatus | null>(null)
-
-  // The bands the settings form offers. Fetched once rather than on every poll:
-  // the list changes only when the network server is rebuilt, and the form is a
-  // rare visit compared with the dashboard's fifteen-second refresh.
-  const [regions, setRegions] = useState<RegionList | null>(null)
-
-  // The newest snapshot, for merging a refresh into it. It is written only
-  // where the snapshot changes — in the refresh and in patchSnapshot — so it
-  // never needs syncing from state, and reading it does not depend on when
-  // React commits.
-  const snapshotRef = useRef<NetworkSnapshot>(emptySnapshot)
-  const abortRef = useRef<AbortController | null>(null)
-
-  const refreshNetworkSnapshot = useCallback(async () => {
-    // A refresh started while an earlier one is still in flight makes that
-    // result stale; cancelling it stops the panels flickering backwards.
-    abortRef.current?.abort()
-    const controller = new AbortController()
-    abortRef.current = controller
-    setLoading(true)
-    try {
-      const previous = snapshotRef.current
-      const next = await loadNetworkSnapshot(previous, controller.signal)
-      if (controller.signal.aborted) return
-      snapshotRef.current = next
-      setSnapshot(next)
-      // Adopt the fetched settings only while the draft is untouched. A
-      // background refresh that overwrote the draft would silently discard what
-      // the operator is typing.
-      setSettingsDraft((draft) => (sameSettings(draft, previous.settings) ? next.settings : draft))
-      setConnection(next.failed.length === 0 ? 'connected'
-        : next.failed.length === sectionKeys.length ? 'offline' : 'degraded')
-
-      // Best-effort and deliberately outside the snapshot: the health report
-      // comes from the network server, and one that is not answering must not
-      // degrade the panels that did load. The badge in the gateways view says
-      // when it is missing.
-      const health = await fetchStatus().catch(() => null)
-      if (!controller.signal.aborted) setStatus(health)
-    } catch {
-      // Per-section failures are reported in the snapshot rather than thrown, so
-      // reaching here means the refresh was superseded or the page went away.
-      if (!controller.signal.aborted) setConnection('offline')
-    } finally {
-      if (!controller.signal.aborted) setLoading(false)
-    }
-  }, [])
-
-  // Asks the network server which bands it implements. A failure is not an
-  // error state: the form falls back to the console's own list and says so,
-  // because an operator should still be able to finish a facility profile while
-  // the network server is restarting.
-  useEffect(() => {
-    let active = true
-    fetchRegions()
-      .then((list) => { if (active) setRegions(list) })
-      .catch(() => { if (active) setRegions(null) })
-    return () => { active = false }
-  }, [])
-
-  // Keeps the ref and the state in step. A refresh merges into snapshotRef, so a
-  // local optimistic update that touched only the state would be quietly undone
-  // by the next poll.
-  function patchSnapshot(patch: Partial<NetworkSnapshot>) {
-    const next = { ...snapshotRef.current, ...patch }
-    snapshotRef.current = next
-    setSnapshot(next)
-  }
-
-  useEffect(() => {
-    // Deferred by a task rather than called inline so the effect body does not
-    // set state synchronously; the first paint still shows the loading state.
-    const first = setTimeout(() => void refreshNetworkSnapshot(), 0)
-    const timer = setInterval(() => {
-      // A hidden tab does not need fresh data, and a dashboard left open for a
-      // week should not quietly turn into a load generator.
-      if (!document.hidden) void refreshNetworkSnapshot()
-    }, REFRESH_INTERVAL_MS)
-    return () => {
-      clearTimeout(first)
-      clearInterval(timer)
-      abortRef.current?.abort()
-    }
-  }, [refreshNetworkSnapshot])
 
   // Devices grouped by the label an operator gave them. Grouping is a filter
   // rather than a tree because a facility's organisation changes — a line is
@@ -176,31 +93,10 @@ function App() {
    * optimistic row rather than leaving a device on screen that cannot join.
    */
   function deviceRegistered(device: Device) {
-    patchSnapshot({ devices: [device, ...snapshotRef.current.devices] })
+    patch({ devices: [device, ...snapshot.devices] })
     setShowAdd(false)
     setView('Devices')
-    void refreshNetworkSnapshot()
-  }
-
-  async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setSettingsError('')
-    setSettingsMessage('')
-    if (connection === 'offline' || connection === 'loading') {
-      setSettingsError('Connect to the database API before saving facility settings.')
-      return
-    }
-    setSettingsSaving(true)
-    try {
-      const saved = await saveFacilitySettings(settingsDraft)
-      patchSnapshot({ settings: saved })
-      setSettingsDraft(saved)
-      setSettingsMessage('Facility settings saved.')
-    } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : 'Settings could not be saved.')
-    } finally {
-      setSettingsSaving(false)
-    }
+    void refresh()
   }
 
   const onlineCount = overview.onlineDevices
@@ -243,7 +139,7 @@ function App() {
         <div className="page-content">
           <div className="page-heading">
             <div><div className="eyebrow">{localTimestamp} <span>·</span> LOCAL</div><h1>{title}</h1><p>{view === 'Overview' ? 'A clear view of what is happening across your facility.' : view === 'Settings' ? 'Facility profile and operator display settings.' : view === 'Models' ? 'Sensor types, and how their payloads are turned into readings.' : `${view} connected to your local network server.`}</p></div>
-            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refreshNetworkSnapshot()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button><PageHeadingAction view={view} canProvision={connection === 'connected'} onAddDevice={() => setShowAdd(true)} /></div>
+            <div className="heading-actions"><button className="button button-secondary" onClick={() => void refresh()}><RefreshCw size={15} className={loading ? 'spinning' : ''} />Refresh</button><PageHeadingAction view={view} canProvision={connection === 'connected'} onAddDevice={() => setShowAdd(true)} /></div>
           </div>
 
           {connection !== 'connected' && connection !== 'degraded' && <div className="demo-notice"><span className="notice-dot" />{connection === 'loading' ? 'Connecting to the database API…' : 'Database API unavailable · no local sample data is shown'}</div>}
@@ -276,7 +172,7 @@ function App() {
             <section className="bottom-grid"><article className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Latest network events</p></div><button className="text-action" onClick={() => setView('Events')}>All events <ArrowUpRight size={14} /></button></div><div className="activity-list">{events.slice(0, 3).map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></article><article className="panel downlink-panel"><div className="panel-heading"><div><h2>Downlink queue</h2><p>Scheduled device messages</p></div><ArrowDown size={16} className="muted-icon" /></div><div className="queue-empty"><div className="queue-icon"><Check size={18} /></div><b>{overview.queuedDownlinks === 0 ? 'Queue is clear' : `${overview.queuedDownlinks} messages queued`}</b><span>{overview.queuedDownlinks === 0 ? 'No pending downlinks' : 'Waiting for an eligible receive window'}</span></div><div className="queue-footer"><span>Last sent</span><b>{overview.lastDownlink} <span>·</span> {overview.sentDownlinks24h} in 24h</b></div></article></section>
           </>}
 
-          {view === 'Devices' && <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refreshNetworkSnapshot()} onDeleted={() => { setSelected(null); void refreshNetworkSnapshot() }} />}</div>}
+          {view === 'Devices' && <div className="device-view"><section className="panel device-panel full-device-panel"><DeviceHeader view={view} setView={setView} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} group={group} setGroup={setGroup} groups={deviceGroups} /><DeviceTable devices={filteredDevices} onSelect={setSelected} /></section>{selected && <DeviceConsole device={selected} onClose={() => setSelected(null)} onChanged={() => void refresh()} onDeleted={() => { setSelected(null); void refresh() }} />}</div>}
           {view === 'Gateways' && <div className="gateway-view">
             {/* First on the page because it is what someone with a gateway in
                 their hands needs, and it was the one thing this view did not
@@ -315,7 +211,7 @@ function App() {
           </div>}
           {view === 'Models' && <DeviceModels decoding={status?.decoding} />}
           {view === 'Events' && <section className="panel event-view"><div className="panel-heading"><div><h2>Network events</h2><p>Recent activity from your local network</p></div><span className="select-button">Most recent</span></div><div className="activity-list event-list">{events.map((event) => <ActivityItem key={event.id} event={event} />)}{events.length === 0 && <div className="empty-result">No network events recorded.</div>}</div></section>}
-          {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={saveSettings} saving={settingsSaving} error={settingsError} message={settingsMessage} disabled={connection === 'offline' || connection === 'loading'} regions={regions?.regions ?? FALLBACK_REGIONS} regionsAreFallback={regions === null || regions.source === 'fallback'} />}
+          {view === 'Settings' && <SettingsForm draft={settingsDraft} setDraft={setSettingsDraft} onSubmit={settingsSave.save} saving={settingsSave.saving} error={settingsSave.error} message={settingsSave.message} disabled={connection === 'offline' || connection === 'loading'} regions={regions.regions} regionsAreFallback={regions.isFallback} />}
 
           <footer className="page-footer"><span>FIELDNODE NETWORK SERVER</span><span><span className={`status-indicator ${connection === 'connected' ? 'green' : ''}`} />{connection === 'connected' ? 'Inventory API connected' : connection === 'loading' ? 'Connecting to API' : connection === 'degraded' ? failedLabel : 'API disconnected'}</span></footer>
         </div>
