@@ -1,10 +1,79 @@
+/**
+ * How recently a device was heard from, as the console words it. These strings
+ * are what the status filter matches on, so they are data as well as display.
+ */
 export type DeviceState = 'Online' | 'Needs attention' | 'Offline'
-export type Device = { id: string; name: string; eui: string; group: string; gateway: string; lastSeen: string; battery: number; state: DeviceState; rssi: number }
+
+/** One end device in the inventory. */
+export type Device = {
+  id: string
+  /** The name an operator typed; only the EUI is guaranteed unique. */
+  name: string
+  /** Extended unique identifier, the device's 64-bit address in hex. */
+  eui: string
+  group: string
+  /** Name of the gateway that last heard this device, or a placeholder. */
+  gateway: string
+  /** Human-readable age of the last uplink, for example "4 minutes ago". */
+  lastSeen: string
+  /** Battery level as a percentage, or 0 when the device never reports one. */
+  battery: number
+  state: DeviceState
+  /** Signal strength of the last uplink in dBm; 0 when never received. */
+  rssi: number
+}
+
 export type GatewayState = 'Online' | 'Offline'
-export type GatewayRecord = { id: string; name: string; region: string; lastSeen: string; state: GatewayState; uplinks24h: number; averageRssi: number | null; averageSnr: number | null }
-export type NetworkEvent = { id: number; type: 'success' | 'warning' | 'info'; title: string; detail: string; timeAgo: string }
-export type Overview = { deviceCount: number; onlineDevices: number; attentionDevices: number; offlineDevices: number; gatewayCount: number; onlineGateways: number; uplinks24h: number; queuedDownlinks: number; sentDownlinks24h: number; lastDownlink: string; hourlyUplinks: number[] }
-export type FacilitySettings = { configured: boolean; facilityName: string; region: string; operatorName: string; operatorRole: string }
+
+/** One gateway as stored by the console, not its live radio health. */
+export type GatewayRecord = {
+  id: string
+  name: string
+  /** The band the gateway is configured for, for example "EU868". */
+  region: string
+  lastSeen: string
+  state: GatewayState
+  uplinks24h: number
+  /** Null means no reception has been recorded, which is not the same as 0. */
+  averageRssi: number | null
+  averageSnr: number | null
+}
+
+/** One row of the activity feed. `type` picks the icon and colour. */
+export type NetworkEvent = {
+  id: number
+  type: 'success' | 'warning' | 'info'
+  title: string
+  detail: string
+  timeAgo: string
+}
+
+/** The counters behind the overview cards. */
+export type Overview = {
+  deviceCount: number
+  onlineDevices: number
+  attentionDevices: number
+  offlineDevices: number
+  gatewayCount: number
+  onlineGateways: number
+  uplinks24h: number
+  queuedDownlinks: number
+  sentDownlinks24h: number
+  /** Human-readable age of the last downlink, or "Never". */
+  lastDownlink: string
+  /** Uplink counts per hour, oldest first, for the overview chart. */
+  hourlyUplinks: number[]
+}
+
+/** The facility details shown in the sidebar and used to fill in defaults. */
+export type FacilitySettings = {
+  /** False until an operator has saved the form, which the UI calls out. */
+  configured: boolean
+  facilityName: string
+  region: string
+  operatorName: string
+  operatorRole: string
+}
 /**
  * `degraded` means the API answered some endpoints and not others. It is
  * distinct from `offline` because the right operator action differs: a partial
