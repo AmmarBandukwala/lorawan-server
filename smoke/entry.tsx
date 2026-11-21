@@ -18,7 +18,7 @@ import { EventsView } from '../src/features/network/views/EventsView'
 import { GatewaysView } from '../src/features/network/views/GatewaysView'
 import { OverviewView } from '../src/features/network/views/OverviewView'
 import { DevicesView } from '../src/features/network/views/DevicesView'
-import { DEVICE_FILTERS, endpointFor, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
+import { DEVICE_FILTERS, endpointFor, transportLabel, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
 import { CommandRejected, failureMessage, isNotFound, isServerUnavailable } from '../src/features/network/control/http'
 import type { GatewayHealth } from '../src/features/network/control/types'
@@ -591,6 +591,32 @@ check('the Events view renders the feed', eventsHtml, 'Device joined')
 check('the Events view says what the feed is', eventsHtml, 'Network events')
 assert('an empty event list says so rather than rendering a blank panel',
   renderToString(h(EventsView, { events: [] })).includes('No network events recorded.'))
+
+// Dead controls. Anything that renders as a button is a promise, so the check is
+// not "does this look right" but "is every button here actually wired".
+const wiredRows = renderToString(h(DeviceTable, { devices: [device], onSelect: noop }))
+assert('a device row renders exactly one button, and it is the wired one',
+  wiredRows.split('<button').length - 1 === 1 && wiredRows.includes('Open the session of'))
+// The row used to render a second, identical chevron labelled "More actions" with
+// no handler at all — a button on every row of the primary table that did nothing.
+assert('no device row offers a “More actions” button that goes nowhere',
+  !wiredRows.includes('More actions'))
+assert('a table without a row handler renders no buttons rather than inert ones',
+  !renderToString(h(DeviceTable, { devices: [device] })).includes('<button'))
+// The gateway card carried an arrow promising a record page that does not exist.
+const cardHtml = renderToString(h(GatewayCard, { gateway, health: health('AA55555555555555', true) }))
+assert('a gateway card renders no button, because there is nothing to open',
+  !cardHtml.includes('<button'))
+// Asserted through transportLabel rather than a literal, so the check says what
+// the card states without hard-coding the wording.
+assert('the gateway card still states the transport it is connected over',
+  cardHtml.includes(transportLabel('semtech-udp')))
+// The sidebar carried three carets implying menus; the window captions carried
+// the styling, cursor included, of the dropdowns they replaced.
+assert('the shell renders no caret that opens nothing', !shell.includes('More actions'))
+assert('window captions are captions, not fake dropdowns', !shell.includes('select-button'))
+check('the Overview still states its window', overviewHtml, 'Last 24 hours')
+check('the Events view still states its order', eventsHtml, 'Most recent')
 
 let failed = 0
 for (const [name, ok] of checks) {

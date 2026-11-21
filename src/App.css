@@ -73,7 +73,10 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .panel-heading h2 { color: #344139; font-size: 12px; font-weight: 650; }
 .panel-heading p { margin-top: 4px; color: #8b958e; font-size: 10px; }
 .traffic-panel { min-width: 0; padding: 15px 16px 12px; }
-.select-button { height: 29px; display: inline-flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #e3e8e3; border-radius: 4px; background: #fff; color: #66736b; font-size: 9px; cursor: pointer; white-space: nowrap; }
+/* A caption stating which window the panel covers. It used to carry the styling of
+   the dropdown it replaced, cursor included, so every one of them looked like it
+   opened a menu and none of them did. */
+.panel-caption { height: 29px; display: inline-flex; align-items: center; gap: 8px; padding: 0 9px; border: 1px solid #e3e8e3; border-radius: 4px; background: #fff; color: #66736b; font-size: 9px; white-space: nowrap; }
 .traffic-summary { display: flex; align-items: baseline; gap: 8px; margin: 15px 0 0 2px; }
 .traffic-summary strong { color: #2d3b34; font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; }
 .traffic-summary small { color: #9aa29d; font-size: 9px; }
@@ -180,7 +183,6 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .gateway-stats div span { display: block; color: #909a93; font-size: 9px; }
 .gateway-stats div b { display: flex; align-items: center; margin-top: 6px; color: #556259; font-size: 11px; font-weight: 600; }
 .gateway-card-footer { display: flex; align-items: center; gap: 6px; padding-top: 12px; color: #59846d; font-size: 9px; }
-.gateway-card-footer button { display: grid; place-items: center; width: 25px; height: 25px; margin-left: auto; border: 0; border-radius: 4px; color: #87948b; background: transparent; cursor: pointer; }
 .event-view { margin-top: 20px; padding: 16px; }
 .event-list { margin-top: 14px; }
 .event-list .activity-item { min-height: 58px; }
