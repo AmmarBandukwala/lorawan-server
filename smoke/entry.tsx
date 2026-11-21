@@ -14,9 +14,16 @@ import { decodeHealth, formatUptime, gatewaySummary, recentlyRestarted } from '.
 import { formatDecoded } from '../src/features/network/control/traffic'
 import type { NetworkStatus, ProvisionedDevice } from '../src/features/network/control/types'
 import { RegisterDeviceDialog } from '../src/features/network/RegisterDeviceDialog'
+import { EventsView } from '../src/features/network/views/EventsView'
+import { GatewaysView } from '../src/features/network/views/GatewaysView'
+import { OverviewView } from '../src/features/network/views/OverviewView'
+import { DevicesView } from '../src/features/network/views/DevicesView'
 import { DEVICE_FILTERS, endpointFor, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
-import type { Device, FacilitySettings, GatewayRecord, NetworkEvent, View } from '../src/features/network/types'
+import { CommandRejected, failureMessage, isNotFound, isServerUnavailable } from '../src/features/network/control/http'
+import type { GatewayHealth } from '../src/features/network/control/types'
+import type { Device, FacilitySettings, GatewayRecord, NetworkEvent, Overview, View } from '../src/features/network/types'
+import { emptyOverview } from '../src/features/network/types'
 
 const noop = () => {}
 const device: Device = { id: '1', name: 'Tank 3', eui: 'AABBCCDDEEFF0011', group: 'Cooling', gateway: 'GW-1', lastSeen: '2 minutes ago', battery: 88, state: 'Online', rssi: -71 }
@@ -273,7 +280,7 @@ const liveHtml = renderToString(h(LiveGatewayCard, {
     gateway_eui: 'AA55555555555555', transport: 'semtech-udp', protocol: 'semtech-udp v2',
     address: '192.168.1.40:44211', online: true, last_seen: '2026-11-17T10:00:00Z', packets: 120,
     downlinks_sent: 7, downlink_errors: 2, downlinks_confirmed: 5, downlinks_unconfirmed: 2,
-    last_tx_ack_error: 'TOO_LATE', rx_received: 90, rx_ok: 88,
+    last_tx_ack_error: 'TOO_LATE', rx_received: 90, rx_ok: 88, tx_received: 7,
   },
 }))
 check('LiveGatewayCard shows the gateway EUI', liveHtml, 'AA55555555555555')
@@ -336,10 +343,15 @@ assert('the save message says what clearing costs',
 // used to discard.
 // ---------------------------------------------------------------------------
 
-const health = (gateway_eui: string, online: boolean) => ({
+// Every required field of GatewayHealth, spelled out. This fixture used to omit
+// the counters the gateway cards read, which the compiler never caught because
+// the smoke harness was not in any tsconfig — the card crashed at render time
+// instead, taking the whole view with it.
+const health = (gateway_eui: string, online: boolean): GatewayHealth => ({
   gateway_eui, transport: 'semtech-udp', protocol: '2', address: '10.0.0.5:44321',
   online, last_seen: '2026-11-17T10:00:00Z', packets: 41,
-  downlinks_sent: 3, downlink_errors: 0,
+  downlinks_sent: 3, downlink_errors: 0, downlinks_confirmed: 3, downlinks_unconfirmed: 0,
+  rx_received: 41, rx_ok: 40, tx_received: 3,
 })
 const liveStatus: NetworkStatus = {
   uptime_seconds: 3720, region: 'EU868', net_id: '000013', downlink_power_dbm: 14,
@@ -487,6 +499,89 @@ check('the connect panel offers to copy the station endpoint', copyPanelHtml, 'w
 assert('each endpoint has its own copy button, so nothing has to be guessed',
   copyPanelHtml.split('copy-endpoint').length - 1 === 2)
 check('a copy button names the endpoint it copies', copyPanelHtml, 'Copy the UDP forwarder endpoint')
+
+// The rejection helpers. These decide what an operator reads when a command
+// fails, and which failures are blamed on the device rather than on us.
+const rejected = new CommandRejected(502, 'gateway_unreachable', 'The network server could not be reached.')
+assert('a rejection shows the network server’s own reason',
+  failureMessage(rejected, 'fallback') === 'The network server could not be reached.')
+assert('a rejection with no detail falls back to its code, not to a generic string',
+  failureMessage(new CommandRejected(409, 'already_queued', ''), 'fallback') === 'already_queued')
+assert('a fetch that never got a response keeps its own message',
+  failureMessage(new Error('Failed to fetch'), 'fallback') === 'Failed to fetch')
+assert('something that is not an error still produces readable text',
+  failureMessage('boom', 'The request failed.') === 'The request failed.')
+assert('404 reads as “nothing here”, not as a broken server',
+  isNotFound(new CommandRejected(404, 'no_session', '')) && !isNotFound(rejected))
+assert('502 and up read as our server being unavailable',
+  isServerUnavailable(rejected) && isServerUnavailable(new CommandRejected(504, 'timeout', '')) &&
+  !isServerUnavailable(new CommandRejected(404, 'no_session', '')))
+assert('a non-rejection is neither, so a network error is not mislabelled',
+  !isNotFound(new Error('Failed to fetch')) && !isServerUnavailable(new Error('Failed to fetch')))
+
+// The views, rendered on their own. App renders these too, but only in its
+// initial loading state under renderToString — so these are what prove the
+// extraction kept the content rather than just the file names.
+const overview: Overview = {
+  ...emptyOverview, deviceCount: 4, onlineDevices: 2, attentionDevices: 1, offlineDevices: 1,
+  gatewayCount: 1, onlineGateways: 1, uplinks24h: 128, queuedDownlinks: 2,
+  sentDownlinks24h: 9, lastDownlink: '4 minutes ago', hourlyUplinks: [1, 0, 3, 7, 2],
+}
+const controls = {
+  query: '', setQuery: noop, filter: 'all' as const, setFilter: noop,
+  group: 'all' as const, setGroup: noop, deviceGroups: ['Cooling'],
+}
+
+const overviewHtml = renderToString(h(OverviewView, {
+  overview, gatewayTotals: gatewaySummary(liveStatus, ['gw1', 'gw-typed-but-dead']),
+  status: liveStatus, gateways: [gateway], events: [event], filteredDevices: [device],
+  view: 'Overview', setView: noop, onSelectDevice: noop, ...controls,
+}))
+check('the Overview renders its metric grid', overviewHtml, 'Registered devices')
+check('the Overview counts the devices it was given', overviewHtml, '>4<')
+check('the Overview names the traffic window rather than a bare number', overviewHtml, 'last 24 hours')
+check('the Overview shows the gateway health panel', overviewHtml, 'Gateway health')
+check('the Overview keeps the network server’s own identity panel', overviewHtml, 'NetID')
+// The gap this closes: the preview rows used to look like the clickable ones on
+// the Devices view and do nothing.
+check('the Overview preview rows are the selectable kind', overviewHtml, 'row-selectable')
+
+const devicesHtml = renderToString(h(DevicesView, {
+  filteredDevices: [device], selected: null, setSelected: noop, refresh: noop,
+  view: 'Devices', setView: noop, ...controls,
+}))
+check('the Devices view renders the table', devicesHtml, 'DEVICE')
+check('the Devices view renders the row it was given', devicesHtml, 'Tank 3')
+assert('an unselected device does not open a session panel', !devicesHtml.includes('Reading the session'))
+
+const gatewaysHtml = renderToString(h(GatewaysView, {
+  status: liveStatus, gateways: [gateway],
+  unheardGateways: [{ ...gateway, id: 'gw-dead', name: 'GW-DEAD' }],
+}))
+check('the Gateways view leads with how to connect one', gatewaysHtml, 'Connect a gateway')
+// A gateway the server has heard from but nobody named is still shown, by the
+// only identifier there is.
+check('the Gateways view shows a live gateway nobody named', gatewaysHtml, 'AA55555555555555')
+// And when an inventory row matches it, the card upgrades to the operator's name
+// plus the database's aggregates.
+const matchedHtml = renderToString(h(GatewaysView, {
+  status: liveStatus,
+  gateways: [{ ...gateway, id: 'AA55555555555555' }],
+  unheardGateways: [],
+}))
+check('a live gateway with an inventory row is shown by its name', matchedHtml, 'GW-1')
+assert('a matched gateway leaves nothing in the unheard section',
+  !matchedHtml.includes('Registered, never heard from'))
+// The two populations must stay visibly separate; merging them is what makes
+// "I registered three and see one" unanswerable.
+check('the Gateways view separates inventory rows that never spoke', gatewaysHtml, 'Registered, never heard from')
+check('the Gateways view names the unheard row rather than hiding it', gatewaysHtml, 'GW-DEAD')
+
+const eventsHtml = renderToString(h(EventsView, { events: [event] }))
+check('the Events view renders the feed', eventsHtml, 'Device joined')
+check('the Events view says what the feed is', eventsHtml, 'Network events')
+assert('an empty event list says so rather than rendering a blank panel',
+  renderToString(h(EventsView, { events: [] })).includes('No network events recorded.'))
 
 let failed = 0
 for (const [name, ok] of checks) {
