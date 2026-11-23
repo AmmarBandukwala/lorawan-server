@@ -2,6 +2,8 @@
   "name": "lorawan-server",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
+  "author": "Ammar Bandukwala",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -23,7 +23,6 @@ telemetry to somebody else's cloud to find out.
 - [Ask the network what happened](#ask-the-network-what-happened)
 - [Let an agent answer questions](#let-an-agent-answer-questions)
 - [What you are taking on](#what-you-are-taking-on)
-- [What works today, and what does not](#what-works-today-and-what-does-not)
 - [Contributing](#contributing)
 
 ## Try it in five minutes
@@ -290,6 +289,13 @@ gated.
 Running this yourself is a real trade, and these are the parts of it that do not show
 up in a feature list.
 
+**Devices set the pace, not you.** This is a class-A network: a device can only be
+reached in the two short windows after it transmits, and then it goes quiet until its
+next scheduled report. There is no "send now". A downlink you queue waits in the
+device's single pending slot until it next wakes, which for a sensor that reports
+hourly can be hours, and an absence of recent traffic is usually normal rather than a
+fault. Class B and class C are not implemented.
+
 **The band has to match, on both sides.** `NS_REGION` in `.env` and the forwarder's
 `global_conf.json` must name the same band. A gateway aimed at a server running a
 different band joins nothing, and the symptom is silence rather than an error. There
@@ -328,38 +334,6 @@ docker compose exec db psql -U fieldnode -d fieldnode -c \
 
 or accept the data loss and start over with `docker compose down -v`.
 
-## What works today, and what does not
-
-US915, EU868 and AS923 with its -2/-3/-4 offsets are implemented, and the console's
-region selector offers exactly what the server enforces, because both read one list.
-OTAA and ABP joins, ADR, confirmed uplinks and their acknowledgements, redundant
-gateway deduplication, duty-cycle enforcement, the Semtech UDP and LoRa Basics
-Station transports, MQTT and webhook integrations, and JavaScript payload formatters
-all work and are covered by tests.
-
-What it does not do yet, stated plainly because each of these is a way a deployment
-could disappoint someone:
-
-- **No class B or class C.** A device can only be reached in the two short windows
-  after it transmits. There is no "send now": a downlink waits for the device's next
-  scheduled report, which for a sensor that reports hourly is hours away.
-- **LoRaWAN 1.1, roaming and FUOTA are out of scope for v1.**
-- **Downlinks go out through one gateway** — the one that heard the device best.
-  Transmitting the same frame through every gateway that heard it, the other way of
-  raising the chance it arrives, is not implemented.
-- **No RX-window detection.** A packet forwarder does not report which window a frame
-  arrived in, so every uplink is treated as RX1. That is safe here because the engine
-  answers in both windows, but an RX2 repeat is scheduled as if it were a first
-  attempt.
-- **Duty-cycle enforcement is not contention-aware across processes.** Two instances
-  can each decide a slot is affordable and both transmit. Run one.
-- **Station configuration is sent once.** `router_config` goes out at handshake and is
-  not re-pushed when the server's band or RX2 settings change, so a station has to
-  reconnect to learn them.
-
-[`ns/README.md`](ns/README.md) carries the full list with the reasoning behind each
-item, plus the milestone roadmap.
-
 ## Contributing
 
 ### Tests
@@ -388,27 +362,6 @@ compiled and passed. It is narrow on purpose — HTTP routes, Go import paths an
 citations into ChirpStack's Rust tree are excluded by construction, because a
 check with false positives is a check that gets ignored.
 
-### Mechanical changes
-
-Rules that exist because each was learned the hard way:
-
-- **Assert the effect, never the exit code.** `sed -i 's/\bFoo\b/foo/'` on macOS
-  matches nothing, exits `0`, and reports success. After any bulk edit, grep for
-  the postcondition: the old form absent *and* the new form present. Better, use
-  an editor or tool that fails loudly when a match is not found.
-- **Never transform a file in place.** Read the original from git
-  (`git show HEAD:path`) rather than a copy you made and might forget. A script
-  that writes the file it reads destroys its own input on the first bad run.
-- **Let the compiler validate code; validate prose separately.** The compiler
-  catches a moved import. It cannot catch a comment describing the old layout,
-  which is what `check-stale-refs.sh` is for.
-- **Prove a refactor lossless.** For a split or move, diff the sorted set of
-  declarations before and after; identical output is the only evidence that
-  nothing was dropped.
-- **Verify the committed tree, not the working tree.** Clone the pushed branch
-  somewhere temporary and run the suite there. It is the only check that catches
-  a test passing because of a file that was never committed.
-
 ### Layout
 
 ```
@@ -421,13 +374,27 @@ db/            database bootstrap (schema is owned by the services' migrations)
 docs/          screenshots used by this README
 ```
 
-### Licensing and credits
+### Licensing
 
-The protocol behaviour follows the LoRaWAN 1.0.3 and RP002 1.0.3 specifications,
-RFC 4493 and the LoRaWAN ADR application note. A small number of test vectors and
-one algorithm's parameterisation were derived from an MIT-licensed LoRaWAN
-implementation; [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists exactly
-what and reproduces the required notice.
+MIT — see [LICENSE](LICENSE).
 
-This repository does not yet carry a `LICENSE` file. Add one before distributing
-the code or accepting contributions from outside.
+```
+Copyright (c) 2026 Ammar Bandukwala
+```
+
+Use it, modify it, deploy it commercially, sell it, fold it into something bigger.
+The one condition is the standard one: the copyright notice and the permission
+notice stay attached to any copy or substantial portion of the source. A credit in
+your documentation or about page is welcome but not required beyond that notice.
+
+### Credits
+
+Protocol behaviour follows the LoRaWAN 1.0.3 and RP002 1.0.3 specifications, RFC
+4493 and the LoRaWAN ADR application note; those are read as documents, not
+vendored, and the normative source for regional parameters is RP002.
+
+A small number of test vectors and one algorithm's parameterisation were derived
+from an MIT-licensed LoRaWAN implementation. That license is compatible with this
+one, and because MIT requires the notice to accompany those portions,
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) names exactly what was taken,
+where it landed, and reproduces the upstream notice.

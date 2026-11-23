@@ -5,10 +5,12 @@ test data from, an MIT-licensed LoRaWAN implementation. MIT requires the copyrig
 notice and permission notice to accompany those portions, so they are reproduced
 here rather than scattered through the source.
 
-> **Note for whoever maintains the license:** this repository currently has no
-> `LICENSE` file, which means recipients get no permission to use, modify or
-> redistribute it, and contributors have no terms to agree to. Add one before
-> distributing or accepting outside contributions.
+> **Why this file exists now that the repository has a license:** this project is
+> MIT-licensed, which grants permission for the code *this repository* wrote. It does
+> not discharge the separate obligation to carry the upstream MIT notice with the
+> portions reproduced below, and those portions remain under their own copyright.
+> The two licenses are the same terms, so there is no conflict to resolve — but the
+> attribution below still has to travel with the code.
 
 ## What was used, and where it landed
 
