@@ -57,15 +57,22 @@ func (s *Service) Ask(ctx context.Context, transcript []llm.Message, emit func(E
 	}, history...)
 
 	calls := 0
+	// Bytes of tool result already replayed into this question. Bounded separately
+	// from the per-result cap because maxCalls is 12: twelve results each under the
+	// per-result ceiling is still more than a small context model has.
+	spent := 0
 	for round := 0; round < maxRounds; round++ {
 		if err := emit(Event{Type: EventStatus, Text: statusLine(round, calls)}); err != nil {
 			return err
 		}
 
+		temperature := answerTemperature
 		response, err := s.model.Stream(ctx, llm.Request{
-			Model:    s.modelID,
-			Messages: messages,
-			Tools:    toolSpecs(offered),
+			Model:       s.modelID,
+			Messages:    messages,
+			Tools:       toolSpecs(offered),
+			Temperature: &temperature,
+			MaxTokens:   maxAnswerTokens,
 		}, func(fragment string) error {
 			return emit(Event{Type: EventToken, Text: fragment})
 		})
@@ -119,11 +126,16 @@ func (s *Service) Ask(ctx context.Context, transcript []llm.Message, emit func(E
 				// model.
 				result = "This lookup failed: " + callErr.Error()
 			}
+			fitted := fitResult(result, spent)
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
 				ToolCallID: call.ID,
-				Content:    result,
+				Content:    fitted,
 			})
+			// The budget tracks what actually entered the context, not what was
+			// asked for: one oversized lookup should not spend the whole allowance
+			// when only the first chunk of it was replayed.
+			spent += len(fitted)
 		}
 	}
 
@@ -211,6 +223,71 @@ func latestQuestion(transcript []llm.Message) string {
 		}
 	}
 	return ""
+}
+
+// Sampling is pinned rather than left to the runtime's default, for two reasons that
+// are both routine with local runtimes. The default temperature on several is high
+// enough that a small model emits tool-call JSON that does not parse, and the loop can
+// only hand that failure back and hope. And with no ceiling on the completion, a model
+// that begins enumerating a fleet generates until it hits the context window, so the
+// answer arrives cut off mid-sentence and looks like a finished one.
+//
+// 1024 tokens is roughly 700 words, which is far past any answer this assistant gives;
+// the point is the ceiling, not the allowance.
+const (
+	answerTemperature = 0.1
+	maxAnswerTokens   = 1024
+)
+
+// maxToolResultBytes caps one lookup's result before it is replayed to the model, and
+// maxToolResultsTotalBytes caps all of them for one question.
+//
+// Both are needed. The measured fixed cost of a request is about 5,000 tokens — the
+// system prompt at roughly 3,000 and twelve tool definitions at roughly 2,000 — before
+// the model reads a single thing, and a `list_devices` on a few hundred nodes is tens of
+// thousands of bytes on its own. The nsclient cap of 4 MB protects this process, not the
+// model's window.
+//
+// The two together keep the worst case near 6,000 tokens of tool output, which with the
+// fixed cost and a bounded completion fits a 16k context — the smallest window worth
+// pointing this at.
+const (
+	maxToolResultBytes       = 6000
+	maxToolResultsTotalBytes = 24000
+)
+
+// fitResult caps a tool result and says that it did.
+//
+// The marker is an instruction, not an apology. A model handed a silently shortened
+// document concludes the fleet is the size of what it can see and reports that as a
+// fact; a model told the rest was cut and how to ask for less narrows the query instead.
+// That is the difference between truncation costing accuracy and costing a round trip.
+//
+// The cut lands on the last closing brace before the limit rather than on the limit
+// itself. These results are JSON documents, and slicing one mid-record shows the model a
+// half-written field, which reads like corrupt data from the network rather than a
+// decision made here.
+func fitResult(result string, spent int) string {
+	const marker = "\n… the rest of this result was cut to fit the model's context, so " +
+		"what follows is a prefix and not the whole answer. Ask again with a dev_eui " +
+		"filter or a smaller limit for the part you actually need."
+
+	budget := maxToolResultBytes
+	if remaining := maxToolResultsTotalBytes - spent; remaining < budget {
+		budget = remaining
+	}
+	if budget <= 0 {
+		return "The lookup budget for this question is spent, so this result was not " +
+			"shown. Answer from what you have already read, and say plainly what you " +
+			"could not check."
+	}
+	if len(result) <= budget {
+		return result
+	}
+	if cut := strings.LastIndexByte(result[:budget], '}'); cut >= budget/2 {
+		return result[:cut+1] + marker
+	}
+	return result[:budget] + marker
 }
 
 // maxTranscript bounds the history replayed to the model. It is measured in messages
