@@ -242,14 +242,16 @@ const (
 // maxToolResultBytes caps one lookup's result before it is replayed to the model, and
 // maxToolResultsTotalBytes caps all of them for one question.
 //
-// Both are needed. The measured fixed cost of a request is about 5,000 tokens — the
-// system prompt at roughly 3,000 and twelve tool definitions at roughly 2,000 — before
-// the model reads a single thing, and a `list_devices` on a few hundred nodes is tens of
-// thousands of bytes on its own. The nsclient cap of 4 MB protects this process, not the
-// model's window.
+// Both are needed. Measured at the read profile, a request costs about 5,000 tokens
+// before the model reads a single result: roughly 2,500 for the guidance block and the
+// event vocabulary, and roughly 2,600 for the twelve tool definitions — the schemas are
+// the largest single item, so trimming the prose saves less than it looks. That figure
+// is a floor: it is 4 characters per token, and JSON with punctuation tokenises denser
+// than that. Against it, a `list_devices` on a few hundred nodes is tens of thousands of
+// bytes on its own, and the nsclient cap of 4 MB protects this process, not the window.
 //
-// The two together keep the worst case near 6,000 tokens of tool output, which with the
-// fixed cost and a bounded completion fits a 16k context — the smallest window worth
+// The two caps together keep the worst case near 6,000 tokens of tool output, which with
+// the fixed cost and a bounded completion fits a 16k context — the smallest window worth
 // pointing this at.
 const (
 	maxToolResultBytes       = 6000

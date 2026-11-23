@@ -316,6 +316,19 @@ looking, and produces advice that reads well and describes a network it never re
 The page lists which lookups it actually made, so a confident answer backed by no
 lookups is visible rather than hidden.
 
+Give the model a 16k context window, and check that the runtime honoured it. The
+system prompt and twelve tool definitions cost about 5,000 tokens before the model
+reads anything, so a window smaller than that does not fail loudly: the runtime
+truncates the request, often dropping the system turn, and the model stops calling
+tools while still answering fluently. That reads like a weak model, so check the
+window first.
+
+The console sends `max_tokens` and `temperature` and nothing else — there is no
+context-window knob to set here, so it has to be configured on the runtime. For
+Ollama, either `OLLAMA_CONTEXT_LENGTH=16384` on the server process, or bake it into
+the model with a Modelfile containing `PARAMETER num_ctx 16384`. vLLM takes
+`--max-model-len 16384`.
+
 ## Operational considerations
 
 Running this yourself carries obligations that a feature list does not show.
