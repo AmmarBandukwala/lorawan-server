@@ -49,6 +49,7 @@ to settle it.
 | `internal/codec` | Payload formatters: a JavaScript runtime with no host access, bounded execution, and a registry that keeps one compiled formatter per model and can name the ones that fail | M6 ✅ |
 | `internal/pgstore` (models) | Device models — what kind of sensor a device is and the formatter its bytes are read with — plus uplinks stored alongside their decoded reading | M6 ✅ |
 | `cmd/ns` (models API) | Model CRUD with save-time compilation, a test-decode endpoint that runs an unsaved script against bytes the operator pastes, and uplink history with readings | M6 ✅ |
+| `cmd/ns` (events API) | Event history read back over the recorded trace, filterable by device and kind, so a refusal is readable without the dashboard | M6 ✅ |
 | `api` + Fieldnode UI (models) | Models in the console: editor, test bench, device association, decoded readings per device. Relayed rather than re-implemented, because only the ns can say whether a script compiles | M6 ✅ |
 | Fieldnode UI (health) | What the ns already reports and the console used to drop: NetID and band to provision against, process uptime as a restart signal, live gateway presence reconciled with the inventory, and the models whose formatter fails at runtime | M6 ✅ |
 
@@ -238,6 +239,35 @@ traces. Statuses are meant to be acted on: 404 means the device is not
 provisioned or has not joined, 409 means one frame is already queued, 400 means
 the request itself is wrong. The session endpoint reports data rates, counters
 and battery — never session keys.
+
+### Reading the event history
+
+`GET /api/v1/events` is the trace: every join, every frame the network refused, and
+the reason it refused. A session read says where a device ended up; this says how it
+got there, which is the difference between a device that is slow and a device whose
+frames have been failing their MIC since this morning.
+
+```sh
+# The last fifty things the network recorded.
+curl -s localhost:8091/api/v1/events -H "Authorization: Bearer $NS_API_TOKEN" | jq
+
+# One device's history, only the refusals.
+curl -s "localhost:8091/api/v1/events?dev_eui=0011223344556677&kind=uplink_drop&limit=20" \
+  -H "Authorization: Bearer $NS_API_TOKEN" | jq
+```
+
+`kind` is one of `join_request`, `join_accept`, `join_reject`, `uplink`, `downlink`,
+`uplink_drop`, `mac`, `error`. Anything else is a 400 that lists them, because an
+unrecognised kind would otherwise come back empty and read as a quiet network.
+`reason` is the machine-readable vocabulary in
+[`internal/engine/events.go`](internal/engine/events.go), which is the file to read
+when the question is why a frame did not get through.
+
+Two absences are load-bearing. A frame the server could not attribute to a session
+is recorded with no device behind it — that is the finding — so it appears in the
+unfiltered list and not in a device's own history. And `f_port` is omitted when the
+event belongs to no application port: a `0` there would be a claim about a real
+port, which LoRaWAN reserves for network MAC commands keyed with NwkSKey.
 
 ### Editing a device without its keys
 

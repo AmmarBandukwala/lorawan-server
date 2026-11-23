@@ -76,6 +76,7 @@ const (
 	msgDeviceSaveFailed = "device could not be saved"
 	msgDeviceDeleteFail = "device could not be deleted"
 	msgDeviceListFailed = "device list unavailable"
+	msgEventListFailed  = "event history unavailable"
 )
 
 func badRequest(w http.ResponseWriter, msg string) { writeError(w, http.StatusBadRequest, msg) }

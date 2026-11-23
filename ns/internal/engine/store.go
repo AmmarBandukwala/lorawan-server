@@ -433,7 +433,19 @@ type Event struct {
 	DevAddr   lorawan.DevAddr
 	GatewayID lorawan.EUI64
 	FCntUp    uint32
-	FPort     int
+
+	// FPort is the application port the event belongs to, or nil when it belongs
+	// to none: a join, a MAC exchange, or a frame that never parsed far enough to
+	// have one.
+	//
+	// A pointer where UplinkRecord and DownlinkRecord use -1, and the difference
+	// is the number of constructors. Those two are built in one place each, which
+	// always sets the sentinel. An Event is built in twenty-six, and the zero value
+	// of an int is 0 — a real LoRaWAN port with a real meaning, network MAC commands
+	// keyed with NwkSKey. So every constructor that left the field alone was
+	// recording an assertion about a port the frame never carried. Nil makes the
+	// unset case the zero value instead of a mistake.
+	FPort *int
 }
 
 // DeviceRepo stores device provisioning records.

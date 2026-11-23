@@ -167,12 +167,26 @@ func (s *Store) RecordEvent(ctx context.Context, ev engine.Event) error {
 		nullableDevAddr(ev.DevAddr),
 		nullableEUI(ev.GatewayID),
 		int64(ev.FCntUp),
-		int16(ev.FPort),
+		eventFPort(ev.FPort),
 	)
 	if err != nil {
 		return fmt.Errorf("pgstore: record event: %w", err)
 	}
 	return nil
+}
+
+// eventFPort maps an event's optional application port onto the f_port column.
+//
+// Unlike the nullable identifiers above, this column is NOT NULL: the schema
+// carries "no application port" as -1, the same sentinel the traffic tables use.
+// A nil therefore becomes -1 rather than NULL — and a real port 0 stays 0, which
+// is the whole reason the field is a pointer. Mapping 0 to -1 here would have been
+// the bug travelling one layer further down.
+func eventFPort(port *int) int16 {
+	if port == nil {
+		return -1
+	}
+	return int16(*port)
 }
 
 // --- Decoded payloads -------------------------------------------------------
@@ -263,6 +277,79 @@ func (s *Store) RecentUplinks(ctx context.Context, devEUI string, limit int) ([]
 			&r.Decoded, &r.DecodeError); err != nil {
 			return nil, fmt.Errorf("pgstore: scan uplink: %w", err)
 		}
+		r.FPort = int(fPort)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// --- Event history ----------------------------------------------------------
+
+// EventRow is one recorded trace entry, as the API reads it.
+//
+// Kind and Reason are the stable vocabulary of internal/engine/events.go rather
+// than a sentence assembled here: a client filters on them, and putting that
+// filter behind wording chosen by this endpoint would make it depend on how one
+// reader happened to phrase a thing. Whoever renders an event assembles its
+// sentence from the pair.
+type EventRow struct {
+	EventID    int64
+	OccurredAt time.Time
+	Kind       string
+	Reason     string
+	Detail     string
+	DevEUI     string
+	DevAddr    string
+	GatewayID  string
+	FCntUp     uint32
+	// FPort is -1 when the event belongs to no application port, which is how the
+	// schema records "absent" for a join or a MAC exchange. A zero here would mean
+	// port 0, and those are different claims.
+	FPort int
+}
+
+// RecentEvents returns the newest trace entries, newest first, optionally filtered
+// to one device and one event kind.
+//
+// Both filters follow RecentUplinks' "empty means all" convention so the API can
+// pass a query parameter through without branching. The kind is validated by the
+// caller: an unrecognised one is a typo, and an empty list in response would read
+// as a quiet network rather than as the bad request it is.
+//
+// The device filter matches events that name the device. A frame the server could
+// not attribute to any session is recorded with a NULL dev_eui — that is the whole
+// point of recording it — so it appears in the unfiltered list and not in a
+// device's own history, which is what the console's device page wants.
+func (s *Store) RecentEvents(ctx context.Context, devEUI, kind string, limit int) ([]EventRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT event_id, occurred_at, kind,
+		       COALESCE(reason, ''), COALESCE(detail, ''),
+		       COALESCE(dev_eui, ''), COALESCE(dev_addr, ''),
+		       COALESCE(gateway_id, ''), f_cnt_up, f_port
+		FROM ns_events
+		WHERE ($1::text = '' OR dev_eui = $1)
+		  AND ($2::text = '' OR kind = $2)
+		ORDER BY occurred_at DESC, event_id DESC
+		LIMIT $3`, devEUI, kind, limit)
+	if err != nil {
+		return nil, fmt.Errorf("pgstore: recent events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EventRow
+	for rows.Next() {
+		var r EventRow
+		var fCntUp int64
+		var fPort int16
+		if err := rows.Scan(&r.EventID, &r.OccurredAt, &r.Kind,
+			&r.Reason, &r.Detail, &r.DevEUI, &r.DevAddr, &r.GatewayID,
+			&fCntUp, &fPort); err != nil {
+			return nil, fmt.Errorf("pgstore: scan event: %w", err)
+		}
+		r.FCntUp = uint32(fCntUp)
 		r.FPort = int(fPort)
 		out = append(out, r)
 	}

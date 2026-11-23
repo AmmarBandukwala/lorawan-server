@@ -251,6 +251,103 @@ func TestTrafficRecords(t *testing.T) {
 		t.Error("an event without device context did not store NULL identifiers")
 	}
 
+	// Reading the history back is what the API's event endpoint is built on, so
+	// the SQL is executed here and not merely compiled.
+	history, err := store.RecentEvents(ctx, devEUI.String(), "", 10)
+	if err != nil {
+		t.Fatalf("RecentEvents (device): %v", err)
+	}
+	if len(history) == 0 {
+		t.Fatal("RecentEvents returned nothing for a device with a recorded join-accept")
+	}
+	for _, ev := range history {
+		if ev.DevEUI != devEUI.String() {
+			t.Errorf("the device filter leaked %q into a device's own history", ev.DevEUI)
+		}
+	}
+	first := history[0]
+	if first.Kind != engine.EventJoinAccept || first.Reason != "" ||
+		first.Detail != "session established" || first.DevAddr != devAddr.String() {
+		t.Errorf("join-accept round trip = %+v", first)
+	}
+	// A join-accept has no application port. The schema records that as -1 and the
+	// reader must see -1, not a port 0 that was never used.
+	if first.FPort != -1 {
+		t.Errorf("FPort = %d, want -1 for an event with no application port", first.FPort)
+	}
+
+	// Unfiltered, the list also carries the orphan the device filter excludes —
+	// which is the only reason the two answers differ, and the reason the console
+	// can show a rejected frame from a device nobody has provisioned.
+	unfiltered, err := store.RecentEvents(ctx, "", "", 200)
+	if err != nil {
+		t.Fatalf("RecentEvents (all): %v", err)
+	}
+	if len(unfiltered) <= len(history) {
+		t.Errorf("the unfiltered list (%d) must be longer than one device's (%d)",
+			len(unfiltered), len(history))
+	}
+	for i := 1; i < len(unfiltered); i++ {
+		if unfiltered[i-1].OccurredAt.Before(unfiltered[i].OccurredAt) {
+			t.Fatalf("events are not newest first at %d", i)
+		}
+	}
+	var sawOrphan bool
+	for _, ev := range unfiltered {
+		if ev.Kind == engine.EventUplinkDrop && ev.Reason == engine.ReasonUnknownDevAddr &&
+			ev.DevEUI == "" && ev.DevAddr == "" && ev.GatewayID == "" {
+			sawOrphan = true
+		}
+	}
+	if !sawOrphan {
+		t.Error("the orphan event did not come back with its NULL identifiers mapped to empty")
+	}
+
+	// The kind filter is an independent axis, and the two together must intersect
+	// rather than union: this device recorded no drops, so asking for both is
+	// empty, and an answer of "everything" would be the worst possible bug here.
+	onlyDrops, err := store.RecentEvents(ctx, "", engine.EventUplinkDrop, 200)
+	if err != nil {
+		t.Fatalf("RecentEvents (kind): %v", err)
+	}
+	if len(onlyDrops) == 0 {
+		t.Fatal("the kind filter returned nothing for a kind just recorded")
+	}
+	for _, ev := range onlyDrops {
+		if ev.Kind != engine.EventUplinkDrop {
+			t.Fatalf("the kind filter returned %q", ev.Kind)
+		}
+	}
+	both, err := store.RecentEvents(ctx, devEUI.String(), engine.EventUplinkDrop, 200)
+	if err != nil {
+		t.Fatalf("RecentEvents (device and kind): %v", err)
+	}
+	if len(both) != 0 {
+		t.Errorf("the two filters combined returned %d rows, want 0", len(both))
+	}
+
+	// A genuine port 0 must survive as 0. That port is not "unset" — LoRaWAN uses
+	// it for network MAC commands keyed with NwkSKey — which is the whole reason
+	// the engine's field is a pointer. Coercing 0 to -1 on the way in would have
+	// been the same bug one layer down, and it is invisible unless someone asks.
+	zeroPort := 0
+	if err := store.RecordEvent(ctx, engine.Event{
+		At: time.Now(), Kind: engine.EventUplink, DevEUI: devEUI, DevAddr: devAddr,
+		FCntUp: 9, FPort: &zeroPort,
+	}); err != nil {
+		t.Fatalf("RecordEvent (port 0): %v", err)
+	}
+	withZeroPort, err := store.RecentEvents(ctx, devEUI.String(), engine.EventUplink, 10)
+	if err != nil {
+		t.Fatalf("RecentEvents (port 0): %v", err)
+	}
+	if len(withZeroPort) == 0 {
+		t.Fatal("the port-0 event did not come back")
+	}
+	if withZeroPort[0].FPort != 0 {
+		t.Errorf("FPort = %d, want the 0 the frame actually carried", withZeroPort[0].FPort)
+	}
+
 	if err := store.DeleteSession(ctx, devEUI); err != nil {
 		t.Fatalf("DeleteSession: %v", err)
 	}

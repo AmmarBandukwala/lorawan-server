@@ -380,7 +380,18 @@ func TestUplinksEndpointNeedsADatabaseStore(t *testing.T) {
 // fakeTraffic records the query the endpoint issued and returns nothing.
 type fakeTraffic struct {
 	gotDevEUI string
+	gotKind   string
 	gotLimit  int
+}
+
+// RecentEvents keeps the stub whole for the widened TrafficReader. The event
+// endpoint has its own stub in api_events_test.go, which can return rows; this one
+// exists so the uplink tests keep compiling against an interface that now carries
+// two reads, and so that widening is visible here rather than silent.
+func (f *fakeTraffic) RecentEvents(_ context.Context, devEUI, kind string, limit int,
+) ([]pgstore.EventRow, error) {
+	f.gotDevEUI, f.gotKind, f.gotLimit = devEUI, kind, limit
+	return nil, nil
 }
 
 func (f *fakeTraffic) RecentUplinks(_ context.Context, devEUI string, limit int,
@@ -465,6 +476,10 @@ func (failedDecodeTraffic) RecentUplinks(context.Context, string, int) ([]pgstor
 		{UplinkID: 2, DevEUI: "0011223344556677", FPort: 10, FRMPayload: []byte{2},
 			DecodeError: "codec: payload formatter reported: bad frame"},
 	}, nil
+}
+
+func (failedDecodeTraffic) RecentEvents(context.Context, string, string, int) ([]pgstore.EventRow, error) {
+	return nil, nil
 }
 
 func TestUplinksRejectsABadDeviceFilter(t *testing.T) {

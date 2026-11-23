@@ -289,10 +289,11 @@ func (e *Engine) dropEvent(ctx context.Context, frame gateway.UplinkFrame, phy *
 			ev.DevAddr = phy.MAC.FHDR.DevAddr
 			ev.FCntUp = uint32(phy.MAC.FHDR.FCnt)
 			if phy.MAC.FPort != nil {
-				ev.FPort = int(*phy.MAC.FPort)
-			} else {
-				ev.FPort = -1
+				port := int(*phy.MAC.FPort)
+				ev.FPort = &port
 			}
+			// Left nil when the frame carries no port, which is what the field
+			// means by absent.
 		}
 		if phy.JoinRequest != nil {
 			ev.DevEUI = phy.JoinRequest.DevEUI

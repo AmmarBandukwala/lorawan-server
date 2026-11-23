@@ -35,10 +35,10 @@ import (
 type apiServer struct {
 	eng     *engine.Engine
 	devices engine.DeviceRepo
-	// models and traffic back the device-model and decoded-uplink endpoints.
-	// Either may be nil on a store that cannot serve it — the in-memory store has
-	// no model repository — and then those endpoints answer 503 rather than
-	// pretending to work.
+	// models and traffic back the device-model, decoded-uplink and event-history
+	// endpoints. Either may be nil on a store that cannot serve it — the in-memory
+	// store has no model repository and no event table — and then those endpoints
+	// answer 503 rather than pretending to work.
 	models  engine.ModelRepo
 	traffic TrafficReader
 	// integrations backs the integration CRUD endpoints, and reloadIntegrations
@@ -67,6 +67,7 @@ type apiServer struct {
 // in-memory store keeps its records in engine shapes and is served elsewhere.
 type TrafficReader interface {
 	RecentUplinks(ctx context.Context, devEUI string, limit int) ([]pgstore.UplinkRow, error)
+	RecentEvents(ctx context.Context, devEUI, kind string, limit int) ([]pgstore.EventRow, error)
 }
 
 // maxDownlinkBytes is the largest application payload accepted. LoRaWAN 1.0.x
@@ -104,6 +105,11 @@ func newAPIServer(addr, token string, eng *engine.Engine, devices engine.DeviceR
 	mux.HandleFunc("DELETE /api/v1/models/{model_id}", server.requireAuth(server.handleDeleteModel))
 	mux.HandleFunc("POST /api/v1/models/{model_id}/decode", server.requireAuth(server.handleTestModelDecode))
 	mux.HandleFunc("GET /api/v1/uplinks", server.requireAuth(server.handleListUplinks))
+
+	// Event history: what the network heard and what it refused. Read-only, but
+	// per-device, which is exactly what the unauthenticated status endpoint
+	// declines to carry — so it is here, behind the token, with everything else.
+	mux.HandleFunc("GET /api/v1/events", server.requireAuth(server.handleListEvents))
 
 	// Integration destinations. Writes reload the live sinks before responding,
 	// so a 2xx means events will go there, not merely that a row was written.
