@@ -39,7 +39,9 @@ import {
 import type {
   AssistantEvent, AssistantReport, AssistantTurn,
 } from '../src/features/network/control/assistant'
-import { AnswerPanel, Assistant as AssistantPanel } from '../src/features/network/panels/Assistant'
+import {
+  AnswerPanel, Assistant as AssistantPanel, AssistantNotice, Composer, EmptyState,
+} from '../src/features/network/panels/Assistant'
 import { readSettings } from '../src/features/network/snapshot'
 import type { AgentAccessReport } from '../src/features/network/control/agentAccess'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
@@ -1083,12 +1085,59 @@ assert('a refusal with no code of its own falls back to the console’s sentence
 // The panels. Effects do not run under renderToString, so the page render is the
 // pre-read state: it must not announce a configuration it has not established.
 const assistantHtml = renderToString(h(AssistantPanel))
-check('the assistant page renders its heading', assistantHtml, 'Ask the network')
 check('the assistant page starts by saying it is checking', assistantHtml, 'Checking…')
-assert('it declares no configuration before the read has returned',
-  !assistantHtml.includes('Not enabled on this deployment') && !assistantHtml.includes('Ready'))
-assert('it offers no question box before it knows a model exists',
+assert('and shows no composer while it does not know a model exists',
   !assistantHtml.includes('assistant-question'))
+assert('it declares no configuration before the read has returned',
+  !assistantHtml.includes('Not enabled on this deployment')
+  && !assistantHtml.includes('Cannot be checked right now'))
+// The three unusable states each say their own thing. Rendered alike they would send an
+// operator to the wrong remedy: one needs .env, one needs a container, one needs patience.
+for (const [state, words] of [
+  ['not-configured', 'LLM_BASE_URL'], ['unreachable', 'Cannot be checked'],
+] as const) {
+  const notice = renderToString(h(AssistantNotice, {
+    state, report: assistantReport({ configured: state === 'unreachable' }),
+  }))
+  check(`the ${state} notice names its own remedy`, notice, words)
+}
+assert('the not-configured notice does not read as a failure',
+  !renderToString(h(AssistantNotice, { state: 'not-configured', report: assistantReport({ configured: false }) }))
+    .includes('role="alert"'))
+
+// The opening state. A blank box under a heading is the shape of a page that has
+// nothing to say; the suggestions are the part that makes it usable, so their presence
+// and their count are the contract, not the wording of any one of them.
+const emptyHtml = renderToString(h(EmptyState, { report: assistantReport({}), onPick: () => undefined }))
+check('the opening state invites the question', emptyHtml, 'Ask about this network')
+assert('and offers several starting points rather than one',
+  (emptyHtml.match(/class="chat-suggestion"/g) ?? []).length >= 3)
+assert('it states the read-only limit before the first question',
+  emptyHtml.includes('only read'))
+assert('picking one fills the composer rather than sending it',
+  emptyHtml.includes('chat-suggestion') && !emptyHtml.includes('type="submit"'))
+
+const composerHtml = renderToString(h(Composer, {
+  question: '', asking: false, report: assistantReport({}),
+  onChange: () => undefined, onAsk: () => undefined, onStop: () => undefined,
+}))
+check('the composer names the model it will ask', composerHtml, 'llama3.1')
+check('and the endpoint the question goes to', composerHtml, 'ollama')
+assert('an empty composer cannot send', composerHtml.includes('disabled'))
+check('and it says how to send', composerHtml, 'Enter to send')
+
+const typingHtml = renderToString(h(Composer, {
+  question: 'why is tank 3 quiet', asking: false, report: assistantReport({}),
+  onChange: () => undefined, onAsk: () => undefined, onStop: () => undefined,
+}))
+assert('a composer with a question in it can send', !typingHtml.includes('disabled'))
+
+const streamingComposerHtml = renderToString(h(Composer, {
+  question: '', asking: true, report: assistantReport({}),
+  onChange: () => undefined, onAsk: () => undefined, onStop: () => undefined,
+}))
+assert('while an answer is arriving the send control becomes a stop',
+  streamingComposerHtml.includes('is-stop') && !streamingComposerHtml.includes('aria-label="Ask"'))
 
 const answerProps = { asking: false, refusal: '' }
 const blankAnswerHtml = renderToString(h(AnswerPanel, { ...answerProps, answer: emptyAnswer() }))
@@ -1123,6 +1172,53 @@ const refusedHtml = renderToString(h(AnswerPanel, {
 }))
 assert('a refusal is dressed as one', refusedHtml.includes('role="alert"'))
 check('and says what it says', refusedHtml, 'No model is configured on this console.')
+
+// The parts of an answer that only exist in this layout.
+//
+// Paragraph breaks are the difference between an answer and a wall of text, and the
+// model emits them: a single element running the whole reply together was most of what
+// made the first version feel wrong, even though nothing was technically missing.
+const paragraphed = applyEvent(
+  applyEvent(applyEvent(emptyAnswer(), { type: 'token', text: 'Two gateways are online.\n\n' }),
+    { type: 'token', text: 'The third stopped reporting Tuesday.' }),
+  { type: 'done', model: 'llama3.1', endpoint: 'http://ollama:11434/v1', tokens: 40 })
+const paragraphHtml = renderToString(h(AnswerPanel, { answer: paragraphed, asking: false, refusal: '' }))
+assert('a blank line in the answer becomes a real paragraph break',
+  (paragraphHtml.match(/<p/g) ?? []).length >= 2)
+assert('and the text survives the split intact',
+  paragraphHtml.includes('Two gateways are online.')
+  && paragraphHtml.includes('The third stopped reporting Tuesday.'))
+
+// The count has to be readable with the group collapsed, because "did it look at
+// anything" is the question being asked at that moment.
+const lookupsHtml = renderToString(h(AnswerPanel, { answer: twice, asking: false, refusal: '' }))
+check('the lookups are counted where a collapsed group still shows it',
+  lookupsHtml, 'Read 2 things')
+assert('a single lookup is not pluralised wrongly',
+  renderToString(h(AnswerPanel, { answer: failedRead, asking: false, refusal: '' }))
+    .includes('Read 1 thing'))
+
+// A retry is offered only where there is something to retry and a way to do it.
+const retryHtml = renderToString(h(AnswerPanel, {
+  answer: halfAnswered, asking: false, refusal: '',
+  lastQuestion: 'why is tank 3 quiet', onRetry: () => undefined,
+}))
+check('a failed answer offers to be asked again', retryHtml, 'Try again')
+assert('and an answer that went fine does not',
+  !renderToString(h(AnswerPanel, { answer: folded, asking: false, refusal: '' }))
+    .includes('Try again'))
+assert('nor does a failure the page cannot retry',
+  !renderToString(h(AnswerPanel, { answer: halfAnswered, asking: false, refusal: '' }))
+    .includes('Try again'))
+
+// A finished answer can be taken somewhere else. The button is absent while text is
+// still arriving, since copying a half answer is how wrong numbers get circulated.
+assert('a finished answer can be copied',
+  renderToString(h(AnswerPanel, { answer: folded, asking: false, refusal: '' })).includes('Copy'))
+assert('while one is arriving there is nothing to copy yet',
+  !renderToString(h(AnswerPanel, {
+    answer: { ...emptyAnswer(), text: 'The device ' }, asking: true, refusal: '',
+  })).includes('Copy'))
 
 let failed = 0
 for (const [name, ok] of checks) {

@@ -677,3 +677,214 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
   .model-test-controls { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* --- Asking the network ------------------------------------------------------------
+   A conversation, not a form. The measurements here are deliberately a step larger
+   than the rest of the console: every other panel is a table of short values read at a
+   glance, while this one is prose someone reads for thirty seconds, and 10px body text
+   is what made the first version feel like a debug view rather than a chat.
+   ------------------------------------------------------------------------- */
+
+.chat-surface {
+  display: flex; flex-direction: column; gap: 12px;
+  height: calc(100vh - 214px); min-height: 440px;
+}
+
+/* Shown instead of the thread when there is nothing to ask. It sits at the top rather
+   than centred in the void, because the two states that reach it are "not configured"
+   and "still checking", and both read as a stalled page if floated mid-screen. */
+.chat-notice {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 16px 18px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--surface);
+}
+.chat-notice h2 { color: #344139; font-size: 13px; font-weight: 650; }
+.chat-notice p { margin-top: 5px; color: #556259; font-size: 11px; line-height: 1.6; }
+.chat-notice-detail { margin-top: 9px; color: #7b857f; font-size: 10px; }
+.chat-notice-detail code { padding: 1px 5px; border-radius: 4px; background: #f2f5f1; color: #4d5a52; font: 10px var(--mono); }
+.chat-notice-icon {
+  display: grid; place-items: center; flex: none;
+  width: 32px; height: 32px; border-radius: 9px;
+  background: var(--green-soft); color: var(--green);
+}
+.chat-notice-icon.is-unreachable, .chat-notice-icon.is-failed { background: #fbeceb; color: #a34e43; }
+.chat-notice-icon.is-not-configured { background: #f6f1e7; color: #9b7440; }
+
+/* The scrolling region. min-height: 0 is not decoration: a flex child defaults to
+   min-height auto, so without it a long thread grows the surface instead of scrolling
+   inside it, and the composer is pushed off the bottom of the page. */
+.chat-thread {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 18px;
+  padding: 20px 20px 24px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface);
+  scrollbar-width: thin;
+}
+
+.chat-empty {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  margin: auto 0; padding: 8px 0 4px; max-width: 560px;
+}
+.chat-empty-mark {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border-radius: 11px; color: var(--green); background: var(--green-soft);
+}
+.chat-empty h2 { color: #2c3a33; font-size: 16px; font-weight: 650; letter-spacing: -.2px; }
+.chat-empty > p { color: #6b766f; font-size: 12px; line-height: 1.65; }
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 6px; }
+.chat-suggestion {
+  padding: 8px 12px; border: 1px solid #e2e8e2; border-radius: 999px;
+  background: #fbfcfa; color: #46534c; font-size: 11px; cursor: pointer;
+  text-align: left; transition: background .12s, border-color .12s;
+}
+.chat-suggestion:hover { background: var(--green-soft); border-color: #cfe3d7; color: #236d52; }
+
+/* There is no global list reset in this stylesheet, so both lists carry the user-agent
+   40px inline padding until told otherwise. On the caveats that pushed the text a third
+   of the way across the panel; on the lookups it doubled an indent the border already
+   provides. */
+.assistant-caveats { display: grid; gap: 5px; margin: 10px 0 0; padding: 0; list-style: none; }
+.assistant-caveats li {
+  display: flex; align-items: flex-start; gap: 7px;
+  color: #8a938c; font-size: 10px; line-height: 1.55;
+}
+.assistant-caveats svg { flex: none; margin-top: 2px; color: #b0b8b2; }
+
+/* Turns. The question is a filled bubble on the right and the answer is plain text on
+   the left, which is the arrangement every chat product settled on: the shape alone
+   tells you who said it, so the names do not have to be repeated above every line. */
+.chat-row { display: flex; gap: 11px; align-items: flex-start; }
+.chat-row.is-user { justify-content: flex-end; }
+.chat-bubble {
+  max-width: min(76%, 620px); padding: 10px 14px;
+  border-radius: 15px 15px 4px 15px;
+  background: var(--green-soft); color: #26463a;
+  font-size: 12.5px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.chat-avatar {
+  display: grid; place-items: center; flex: none;
+  width: 27px; height: 27px; border-radius: 50%;
+  background: #2a795e; color: #fff;
+}
+.chat-body { flex: 1; min-width: 0; }
+.chat-answer { display: flex; flex-direction: column; gap: 9px; }
+
+/* The shared .form-error carries colour and size only, so an icon placed inside one sat
+   flush against the sentence and the triangle overlapped the first letter. Scoped here:
+   every other panel uses .form-error for text alone and must keep its 10px size. */
+.chat-answer .form-error {
+  display: flex; align-items: flex-start; gap: 6px; margin: 0;
+  font-size: 11px; line-height: 1.5;
+}
+.chat-answer .form-error svg { flex: none; margin-top: 2px; }
+
+.assistant-status {
+  display: flex; align-items: center; gap: 7px;
+  color: #7d8a82; font-size: 11px;
+}
+.assistant-status svg { color: var(--green); }
+
+/* The lookups. Collapsed once an answer is finished, because "what did it read"
+   matters while you decide whether to trust a reply and is clutter afterwards; the
+   count stays in the summary either way. */
+.assistant-tools { border-left: 2px solid #e7ece7; padding-left: 11px; }
+.assistant-tools summary {
+  color: #78837c; font-size: 10.5px; cursor: pointer;
+  list-style: none; user-select: none;
+}
+.assistant-tools summary::-webkit-details-marker { display: none; }
+.assistant-tools summary::before { content: '▸ '; color: #a9b2ac; }
+.assistant-tools[open] summary::before { content: '▾ '; }
+.assistant-tools summary:hover { color: #4e5b54; }
+.assistant-tools ul { display: grid; gap: 4px; margin: 7px 0 0; padding: 0; list-style: none; }
+.assistant-tools li {
+  display: flex; align-items: center; gap: 6px;
+  color: #6d7871; font-size: 10.5px;
+}
+.assistant-tools li svg { flex: none; color: #8fa39a; }
+.assistant-tools li code { color: #4a5850; font: 10px var(--mono); }
+.assistant-tools li span { color: #a35a4e; }
+
+.assistant-text { display: grid; gap: 9px; color: #2b3733; font-size: 12.5px; line-height: 1.7; }
+.assistant-text p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The caret the streaming products use to show text is still arriving. A spinner
+   beside it would say "working"; this says "more is coming right here", which is the
+   true thing while a model is mid-sentence. */
+.chat-caret {
+  display: inline-block; width: 7px; height: 15px; margin-left: 2px;
+  vertical-align: text-bottom; border-radius: 1px; background: var(--green);
+  animation: chat-blink 1.05s steps(2, start) infinite;
+}
+@keyframes chat-blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) {
+  .chat-caret { animation: none; }
+  .chat-suggestion { transition: none; }
+}
+
+.chat-answer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding-top: 7px; border-top: 1px solid #f0f3ef;
+}
+.chat-answer-foot .panel-note { margin: 0; font-size: 10px; }
+.chat-inline-action {
+  /* align-self, not width: .chat-answer is a flex column, so a bare button stretches
+     across the whole thread and reads as a full-width bar rather than a small action. */
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 5px;
+  padding: 3px 8px; border: 1px solid #e2e8e2; border-radius: 5px;
+  background: #fff; color: #66736b; font-size: 10px; cursor: pointer;
+}
+.chat-inline-action:hover { background: #f6f8f5; color: #3f4c45; }
+
+/* The composer. One bordered box holding the field and the send control, because a
+   button sitting outside the field reads as a separate action and gets missed. */
+.chat-composer { display: flex; flex-direction: column; gap: 7px; }
+.chat-composer-box {
+  display: flex; align-items: flex-end; gap: 9px;
+  padding: 9px 9px 9px 15px;
+  border: 1px solid #dde4dd; border-radius: 14px;
+  background: var(--surface);
+  transition: border-color .12s, box-shadow .12s;
+}
+.chat-composer-box:focus-within {
+  border-color: #9fc7b3; box-shadow: 0 0 0 3px #eaf5ef;
+}
+.assistant-question {
+  flex: 1; min-width: 0; border: 0; outline: 0; resize: none;
+  background: transparent; color: var(--ink);
+  font: inherit; font-size: 12.5px; line-height: 1.6;
+  max-height: 190px; padding: 2px 0;
+}
+.assistant-question::placeholder { color: #a4ada7; }
+.chat-send {
+  display: grid; place-items: center; flex: none;
+  width: 32px; height: 32px; border: 0; border-radius: 50%;
+  background: var(--green); color: #fff; cursor: pointer;
+  transition: background .12s, opacity .12s;
+}
+.chat-send:hover:not(:disabled) { background: #1d6850; }
+.chat-send:disabled { background: #d7ded8; color: #fff; cursor: default; }
+/* Deliberately not green: a control that stops something in progress should not share
+   the colour of the one that starts it, which is the mistake that makes people press
+   send when they meant to abort. */
+.chat-send.is-stop { background: #4b5a52; }
+.chat-send.is-stop:hover { background: #3b4841; }
+
+.chat-composer-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 0 4px; color: #98a19b; font-size: 10px;
+}
+.assistant-model { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+.assistant-model svg { flex: none; color: #b0b8b2; }
+.assistant-model code {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;
+  color: #8b948e; font: 9.5px var(--mono);
+}
+
+@media (max-width: 900px) {
+  .chat-surface { height: auto; min-height: 0; }
+  .chat-thread { max-height: 62vh; }
+  .chat-bubble { max-width: 88%; }
+  .chat-composer-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
+}
+
