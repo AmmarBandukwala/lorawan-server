@@ -21,8 +21,11 @@ RUN cd /src/mcp && go test ./... && \
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/fieldnode-mcp /fieldnode-mcp
-# No EXPOSE: this server speaks MCP over stdio and listens on nothing. The
-# network transport, when it arrives, will be a separate decision with its own
-# authentication.
+# No EXPOSE, and no listening by default: this process serves MCP over stdio
+# unless MCP_HTTP_ADDR names an address, in which case it listens and demands
+# MCP_AUTH_TOKEN on every request. The compose service sets both.
+#
+# The binary is also its own health probe (`-healthz`), because there is no shell
+# and no curl in this image for a healthcheck to run.
 USER nonroot:nonroot
 ENTRYPOINT ["/fieldnode-mcp"]

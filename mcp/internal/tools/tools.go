@@ -43,7 +43,9 @@ import (
 
 	"github.com/fieldnode/lorawan-server/mcp/internal/audit"
 	"github.com/fieldnode/lorawan-server/mcp/internal/nsclient"
+	"github.com/fieldnode/lorawan-server/mcp/internal/prompts"
 	"github.com/fieldnode/lorawan-server/mcp/internal/redact"
+	"github.com/fieldnode/lorawan-server/mcp/internal/resources"
 )
 
 // Deps are the ports every tool goes through.
@@ -123,6 +125,13 @@ func New(d *Deps, profile Profile, version string, logger *slog.Logger) (*mcp.Se
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// Resources and prompts are registered here rather than in main so that what the
+	// tests assert a client can see is what this process actually offers. They are
+	// reads of a kind and follow the profile: writes never appear here at all.
+	resources.Register(s, d.NS)
+	prompts.Register(s)
+
 	return s, names, nil
 }
 
@@ -135,8 +144,18 @@ func instructionsFor(profile Profile) string {
 	if profile == ProfileOperate {
 		return instructions + writeInstructions
 	}
-	return instructions
+	return instructions + readOnlyInstructions
 }
+
+// readOnlyInstructions states the limit explicitly. It is worth a paragraph because
+// the absence of a capability is otherwise invisible: an agent that does not know it
+// cannot write will still sometimes try, and a tool-not-found refusal tells it less
+// than being told where the line is.
+const readOnlyInstructions = `
+
+Every tool here is a read. Nothing in this deployment can queue a frame, change a
+device or alter a configuration, however often it is asked; if a question needs one of
+those, the answer is to say so rather than to look for another way.`
 
 // instructions is the orientation every client receives at initialize. It is the only
 // text that reaches the model before it has called anything, so it carries the things

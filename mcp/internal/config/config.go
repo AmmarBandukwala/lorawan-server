@@ -6,6 +6,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -31,10 +32,20 @@ type Config struct {
 	// endpoint apart from the authenticated API on purpose.
 	StatusURL string
 
-	// Token is the bearer token. It comes from the environment and is never
-	// logged, never returned by a tool, and never part of a tool's arguments —
-	// which is why it is configuration and not an input.
+	// Token is the bearer token this process presents to the network server. It
+	// comes from the environment and is never logged, never returned by a tool, and
+	// never part of a tool's arguments — which is why it is configuration and not
+	// an input.
 	Token string
+
+	// HTTPAddr, when set, serves the streamable HTTP transport on that address
+	// instead of stdio. Empty means stdio, which is the default because the usual
+	// way to run this is a host spawning it as a child process.
+	HTTPAddr string
+
+	// AuthToken is the bearer token callers must present to HTTPAddr. It is a
+	// different secret from Token on purpose: see internal/httpserver.
+	AuthToken string
 
 	// Version is reported to clients as this server's implementation version.
 	Version string
@@ -51,6 +62,8 @@ func Load() (Config, error) {
 		APIURL:    trim(os.Getenv("NS_API_URL")),
 		StatusURL: trim(os.Getenv("NS_STATUS_URL")),
 		Token:     trim(os.Getenv("NS_API_TOKEN")),
+		HTTPAddr:  strings.TrimSpace(os.Getenv("MCP_HTTP_ADDR")),
+		AuthToken: strings.TrimSpace(os.Getenv("MCP_AUTH_TOKEN")),
 		Version:   "0.1.0",
 	}
 
@@ -84,7 +97,45 @@ func Load() (Config, error) {
 			"Set NS_STATUS_URL when the network server serves it on its status port",
 			"base", cfg.APIURL)
 	}
+
+	if err := cfg.validateHTTP(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// validateHTTP checks the listener only when one was asked for, so a stdio
+// deployment is not made to configure a secret it has no use for.
+//
+// Reusing NS_API_TOKEN as MCP_AUTH_TOKEN is refused rather than warned about. The
+// two secrets exist so that leaking or rotating one leaves the other intact; making
+// them equal is the exact configuration the split was meant to prevent, and a
+// deployment that has done it by copy-paste should learn at startup rather than at
+// the point it needs to revoke one.
+func (c Config) validateHTTP() error {
+	if c.HTTPAddr == "" {
+		if c.AuthToken != "" {
+			slog.Warn("MCP_AUTH_TOKEN is set but MCP_HTTP_ADDR is not, so there is no " +
+				"listener to authenticate requests to; this process serves stdio")
+		}
+		return nil
+	}
+	if c.AuthToken == "" {
+		return fmt.Errorf("MCP_AUTH_TOKEN is required when MCP_HTTP_ADDR is set: a "+
+			"network listener without authentication hands the whole network to anything "+
+			"that can reach %s", c.HTTPAddr)
+	}
+	if len(c.AuthToken) < minTokenLen {
+		return fmt.Errorf("MCP_AUTH_TOKEN must be at least %d characters; generate one "+
+			"with: openssl rand -hex 32", minTokenLen)
+	}
+	if c.AuthToken == c.Token {
+		return errors.New("MCP_AUTH_TOKEN must not be the same as NS_API_TOKEN: one " +
+			"secret guarding both this listener and the network server's API means one " +
+			"leak opens both, and neither can be rotated without the other. Generate a " +
+			"second one with: openssl rand -hex 32")
+	}
+	return nil
 }
 
 func trim(s string) string {

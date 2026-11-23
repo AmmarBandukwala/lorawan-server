@@ -230,22 +230,70 @@ it reaches a model, and the device inventory is capped at 200 members with the
 truncation carried as a member of the array rather than as prose, so a count of what
 is present cannot be mistaken for a count of what exists.
 
-## PR 4 — resources and prompts
+## PR 4 — resources and prompts — done
 
 Resources `fieldnode://status`, `fieldnode://devices`,
 `fieldnode://devices/{dev_eui}`, `fieldnode://event-vocabulary`,
-`fieldnode://regions`. Prompts as runbooks that name the tools they expect:
-`diagnose-device`, `why-no-downlink` (gateway `PULL_DATA` presence, then
-`last_tx_ack_error`, then duty-cycle budget — the order the troubleshooting table
-in `ns/README.md` already prescribes), `fleet-health`.
+`fieldnode://devices/{dev_eui}/session`. Prompts as runbooks that name the tools they
+expect: `diagnose-device`, `why-no-downlink` (gateway `PULL_DATA` presence, then
+`last_tx_ack_error`, then duty-cycle budget — the order the troubleshooting table in
+`ns/README.md` already prescribes), `fleet-health`.
 
-## PR 5 — Streamable HTTP and compose
+### What PR 4 changed relative to this plan
 
-`--http :8092` as a service on the internal `backend` network with its own
-`MCP_AUTH_TOKEN`, compared in constant time as `requireAuth` in
-`ns/cmd/ns/api.go` does. The session removal in `2026-07-28` makes this simpler
-than it was. Never published: the console API beside it has no authentication at
-all, and this service holds a token that can make devices transmit.
+- **`fieldnode://regions` was dropped.** It would have been a static list of band names
+  that the network server already reports on `/status` and the console already reads from
+  it. A resource that duplicates another source is one more thing that can disagree.
+- **A session resource was added** beside the device one. The plan listed only
+  `devices/{dev_eui}`, and a host pinning context for a device wants its radio state as
+  much as its configuration.
+- **Templates are a separate list.** `resources/list` and `resources/templates/list` are
+  different calls, so the templated URIs are discoverable only through the second. The
+  plan did not distinguish them; a test now asserts both halves, because a registration
+  in the wrong list passes a test that only calls `ListResources`.
+- **A runbook identifier guard was added**, which the plan did not call for. A prompt
+  that tells an agent to call a tool that no longer exists costs a turn on a refusal —
+  and if the name is close to a real one, the agent may call *that*, which on this
+  network means transmitting. Every snake_case identifier in a runbook must be an
+  advertised tool or a listed field, kind or reason; the allowlist may not contain a
+  tool name and may not contain an unused entry, so a rename cannot hide inside it.
+- **Instructions became profile-dependent.** The read-only wording was unconditional, so
+  enabling writes made its first sentence false in exactly the deployment where being
+  wrong costs most. A test now compares the orientation against the tool list.
+
+## PR 5 — Streamable HTTP and compose — done
+
+`MCP_HTTP_ADDR` as a service on the internal `backend` network with its own
+`MCP_AUTH_TOKEN`, compared in constant time as `requireAuth` in `ns/cmd/ns/api.go` does.
+The session removal in `2026-07-28` did make this simpler: the listener is stateless, so
+there is no idle session to leak.
+
+### What PR 5 changed relative to this plan
+
+- **A flag became an environment variable.** `--http :8092` became `MCP_HTTP_ADDR`,
+  because this process takes no other flags and the `flag` package exits on an
+  unrecognised argument — which is wrong when an MCP host is the one supplying the
+  command line. `-healthz` is parsed by hand for the same reason.
+- **"Never published" became "loopback by default".** An endpoint nothing can reach is
+  not a safer endpoint, it is a dead one, and the repo already publishes the status port
+  on loopback with a documented bind override. Publishing on `0.0.0.0` is documented as
+  requiring TLS in front, because a bearer token over plain HTTP is readable on the wire.
+- **Reusing `NS_API_TOKEN` as `MCP_AUTH_TOKEN` is refused at startup**, not merely
+  discouraged. The whole reason for a second secret is independent rotation and blast
+  radius; a copy-paste that makes them equal defeats it silently.
+- **The compose service is behind a profile.** Otherwise `docker compose up` would add a
+  door to every existing deployment, and would fail for any that had not set a new
+  required variable.
+- **The binary is its own health probe**, matching `ns`: the runtime image is distroless
+  and has no curl. It deliberately does not consult the network server — a probe that
+  failed whenever the ns was down would have the orchestrator restart a healthy
+  container while the thing needing attention sat unmentioned.
+- **The default-client question was tested rather than assumed.** The SDK's client opens
+  a standalone SSE stream and a stateless listener answers that GET with 405. Whether
+  that is fatal is a property of client and server together. It is not fatal, so no host
+  needs a special flag — but that is now a test, not a hope.
+- **No rate limit**, stated rather than silently absent: a useful one needs to know which
+  caller is which, and one shared bearer token cannot distinguish two of them.
 
 ## Verification
 

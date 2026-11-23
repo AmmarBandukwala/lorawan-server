@@ -27,8 +27,9 @@ So this server adds two things the API cannot carry:
 
 ## Running it
 
-The process speaks MCP over stdio and is spawned by the host, so point your client at a
-command rather than a URL.
+Two transports. **stdio** is the default and the usual one: the host spawns the process,
+so whoever can start it is whoever can use the token, and there is no second access
+control to get wrong. **Streamable HTTP** is for a host that cannot spawn a process.
 
 ```
 NS_API_URL=http://127.0.0.1:8091 \
@@ -67,6 +68,61 @@ can exfiltrate in plain text.
 Put the token in the client's config, not in a prompt. Anything that appears in a
 prompt appears in a transcript.
 
+### Over HTTP
+
+Set `MCP_HTTP_ADDR` and the same process listens instead, at `/mcp`:
+
+```
+NS_API_URL=http://ns:8091 NS_STATUS_URL=http://ns:8090 NS_API_TOKEN=... \
+MCP_HTTP_ADDR=127.0.0.1:8092 \
+MCP_AUTH_TOKEN=<a second, different token> \
+./fieldnode-mcp
+```
+
+`MCP_AUTH_TOKEN` is required with a listener, and the process **refuses to start if it
+equals `NS_API_TOKEN`**. One secret guarding both this door and the network server's API
+means one leak opens both, and neither can be rotated without the other.
+
+Every request needs `Authorization: Bearer <token>`. `/healthz` is the exception: it is
+unauthenticated, returns `{"status":"ok"}`, and says nothing about the network — an
+orchestrator should not need a secret to learn that a process is up, and should not be
+able to read a fleet through it. A wrong path answers 404 naming `/mcp`, because the
+common mistake is a client pointed at root.
+
+The listener is **stateless**. Nothing here calls back into a client — sampling, roots
+and server-initiated logging are all deprecated at protocol revision 2026-07-28 — so
+there is no session to leak and nothing to resume. A client that opens a standalone SSE
+stream gets a 405 for it and carries on; that is verified rather than assumed, in
+`TestADefaultHostWorksAgainstTheStatelessListener`, because whether it is fatal is a
+property of the client and this server together and no host should need a special flag.
+
+A Go host authenticates by giving the transport an `*http.Client`, not a token:
+
+```go
+transport := &mcp.StreamableClientTransport{
+    Endpoint: "http://127.0.0.1:8092/mcp",
+    HTTPClient: &http.Client{Transport: myBearerRoundTripper},
+}
+```
+
+**Plain HTTP.** A bearer token over an unencrypted link is readable by anyone who can
+see the wire, so bind to loopback or put TLS in front. There is **no rate limit**: a
+useful one needs to know which caller is which, and a single shared token cannot tell.
+Anything beyond loopback should sit behind a proxy that can.
+
+### With Docker Compose
+
+The service is behind a profile, so pulling the stack up does not open a door:
+
+```
+docker compose --profile mcp up -d
+```
+
+It is published on loopback by default (`MCP_BIND_ADDRESS`, `MCP_HTTP_PORT`), reads both
+upstreams over the internal network, and health-checks itself with
+`fieldnode-mcp -healthz` — the runtime image is distroless, so the binary has to be its
+own probe. See `.env.example` for `MCP_AUTH_TOKEN` and `MCP_PROFILE`.
+
 ## The tools
 
 | Tool | What it answers |
@@ -91,6 +147,54 @@ with `MCP_PROFILE=operate`:
 | `cancel_downlink` | Discards the frame waiting in that slot | The application wanted it sent; after this it will not be, with nothing behind it |
 | `request_device_status` | Queues a DevStatusReq for battery and link margin | Reads like a query, is a write: it occupies the same single slot |
 | `patch_device` | Partial update to one device's configuration | `enabled:false` takes the device off the network, which looks to its owner like a broken device |
+
+## Resources
+
+Resources are the same network through a different door, for context a host wants
+*before* it starts reasoning — some clients pin one into every conversation the way a
+system prompt is pinned. So these are the reads whose value is highest at the start of a
+session and whose cost is paid once.
+
+| URI | What it is |
+|---|---|
+| `fieldnode://status` | The live health snapshot, as JSON |
+| `fieldnode://devices` | The inventory, capped and summarised rather than whole |
+| `fieldnode://event-vocabulary` | Every recorded reason, what it means and what usually causes it |
+| `fieldnode://devices/{dev_eui}` | One device, verbatim *(template)* |
+| `fieldnode://devices/{dev_eui}/session` | One session *(template)* |
+
+The templated two are advertised under `resources/templates/list`, not
+`resources/list` — which is why a test asserts both halves, since a registration in the
+wrong list looks fine until a client tries to read the literal string
+`fieldnode://devices/{dev_eui}` as a DevEUI.
+
+Resource reads go through the **same redaction and capping as a tool result**. A second
+door into the same data that skips the guard is not a second door; it is the hole. A URI
+naming something that does not exist answers *not found* rather than an empty body:
+returning nothing would let a client conclude a device has no session when in fact
+nothing was found at all.
+
+## Prompts
+
+Three runbooks, which carry no data — only the order, and the reason the order is that
+way. That is what keeps them honest: nothing in them can be stale about a particular
+device, because nothing in them claims to know about one.
+
+| Prompt | Needs | What it is for |
+|---|---|---|
+| `diagnose-device` | `dev_eui` | Why one device is misbehaving, cheapest-and-widest first so the expensive steps are often skipped |
+| `why-no-downlink` | `dev_eui` | A frame that was accepted and never arrived, without retrying it into a 409 |
+| `fleet-health` | nothing | Whether the network as a whole is well |
+
+The order is not decoration. The sequence for a device that is not answering is already
+written down in `ns/README.md`, and an agent that rediscovers it will get it wrong in a
+way that costs a live network real transmissions — retrying a queued frame, or asking for
+a battery report that occupies the one slot holding the frame the application wanted
+sent.
+
+A test extracts every identifier a runbook names and checks it is a real tool, field,
+kind or reason, so a prompt cannot tell an agent to call something that does not exist.
+Renaming a tool breaks that test on purpose.
 
 ## Profiles
 
@@ -118,6 +222,7 @@ and the tools say so in the output rather than relying on the reader to know:
   full battery. Rendered as `255/255` it reads as the opposite of true.
 - **`has_codec: false`** means no formatter is configured. A formatter that has quietly
   broken looks identical to a fleet with no formatters unless you check.
+
 ## What this server deliberately does not do
 
 **Three categories are out of every profile**, including `operate`. The network server's
@@ -169,8 +274,26 @@ module's copies of the vocabulary. Neither module can import the other — `ns/i
 is closed by construction — so nothing but these tests notices when the network server
 gains a ninth event kind and the tool description still lists eight.
 
-Both were checked by mutation: renaming a vocabulary entry and deleting a kind each
-produce a failure naming the exact string and the file to fix.
+Three more guard things nothing else can see:
+
+- **Routes.** `internal/nsclient` pins the path each read actually sends. `ns` and `mcp`
+  are separate modules, so a wrong route is not a compile error — it is a 404 an agent
+  reports as "that device does not exist".
+- **Runbook identifiers.** Every tool, field, kind and reason a prompt names must exist.
+- **Instructions vs. profile.** The orientation a client gets at initialize must not
+  contradict the tool list. The read-only wording used to be unconditional; once writes
+  existed, a model told "every tool here is a read" would not look for the tools that
+  transmit.
+
+Every one of these was checked by mutation, because a guard that passes vacuously is
+worse than no guard — it advertises safety it does not provide. Renaming a vocabulary
+entry, deleting a kind, renaming a tool inside a runbook, dropping the resource
+registration from `tools.New`, deleting the read-only sentence, and opening the bearer
+middleware each produce a failure naming the exact string or the exact symptom.
+
+The auth guard is checked at two levels on purpose: the middleware's own table-driven
+test, and a real MCP client that must fail to complete a session. The first caught a
+mutation that the second did not, and vice versa.
 
 ### Tests worth knowing about
 
@@ -184,8 +307,24 @@ produce a failure naming the exact string and the file to fix.
 - The digest tests are mostly about **missing data**: no session, no formatter, a broken
   events endpoint, a device that does not exist. That is where a composed answer can lie
   by omission.
+- `TestPatchSendsOnlyTheFieldsSupplied` is the load-bearing write test. If a zero-valued
+  bool were serialised for a field the caller never mentioned, a call that meant to
+  rename a device would also send `enabled:false` and take it off the network — and
+  report success while doing it. Its companion checks an explicit `null` location is
+  forwarded as null while an omitted one is absent entirely, because the network server
+  tells those apart and a typed field would collapse them.
+- `internal/tools/http_test.go` connects a **real MCP client over a real socket** to the
+  same server stdio uses, and includes a default-configured client against the stateless
+  listener — an interop property of the client and server together that neither package
+  can assert alone.
 
 ## Status
 
-Read-only, stdio only, single-tenant. Resources, prompts, and a streamable HTTP
-transport with its own authentication are planned; see `PLAN.md`.
+Read-only by default; four writes under `MCP_PROFILE=operate`. Both transports — stdio
+and streamable HTTP — are implemented, along with resources and prompts. Single-tenant:
+one token is full access to the network, because the network server has no scopes to
+derive anything narrower from.
+
+Not offered, in any profile: creating or deleting a device, changing an integration,
+installing a payload formatter. `PLAN.md` records why those were excluded rather than
+merely gated, and what would have to change for any of them to be reconsidered.

@@ -116,6 +116,61 @@ services:
     networks:
       - backend
 
+  # The MCP server, which lets an agent interrogate the network. Off by default:
+  # it only starts under `docker compose --profile mcp up`, because it is a door
+  # into the network and nobody should get one by pulling the stack up.
+  #
+  # It is a third module with its own go.mod, and it holds no state: everything it
+  # answers comes from the network server over the same API the console uses, so it
+  # cannot disagree with the console about what a device is.
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: mcp/Dockerfile
+    restart: unless-stopped
+    environment:
+      # Both upstreams are the service names on the internal network. The status
+      # URL is separate because /status is unauthenticated and served on its own
+      # port; the client sends the API token only to the API.
+      NS_API_URL: http://ns:8091
+      NS_STATUS_URL: http://ns:8090
+      NS_API_TOKEN: ${NS_API_TOKEN}
+      # What this process may do. read is the default and offers no writes at all.
+      # operate adds queueing, cancelling and reconfiguring a device that is
+      # already provisioned. Creating a device, changing an integration and
+      # installing a payload formatter are in no profile: see mcp/README.md.
+      MCP_PROFILE: ${MCP_PROFILE:-read}
+      # The listener. Without this the process serves MCP over stdio and the port
+      # mapping below would connect to nothing, so it is set here rather than
+      # exposed as a variable: inside the container the address is always this.
+      MCP_HTTP_ADDR: :8092
+      # Required with this profile, and deliberately NOT the same variable as
+      # NS_API_TOKEN. One secret guarding both this listener and the network
+      # server's API means one leak opens both, and neither can be rotated
+      # without the other. The process refuses to start if the two are equal.
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:?Set MCP_AUTH_TOKEN in .env to start the mcp profile}
+      # debug | info | warn | error
+      MCP_LOG_LEVEL: ${MCP_LOG_LEVEL:-info}
+    ports:
+      # Loopback by default, like the status endpoint. The MCP endpoint speaks
+      # plain HTTP and a bearer token over plain HTTP is readable by anyone on the
+      # wire, so publishing this on 0.0.0.0 means putting TLS in front of it
+      # first. Agents running on this host reach it at 127.0.0.1 without that.
+      - "${MCP_BIND_ADDRESS:-127.0.0.1}:${MCP_HTTP_PORT:-8092}:8092"
+    depends_on:
+      ns:
+        condition: service_healthy
+    healthcheck:
+      # The image is distroless, so the binary is its own probe.
+      test: ["CMD", "/fieldnode-mcp", "-healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - backend
+
   web:
     build: .
     restart: unless-stopped

@@ -203,3 +203,28 @@ func Reasons() []string {
 	sort.Strings(out)
 	return out
 }
+
+// Described is one reason with its commentary, in the shape a reader wants.
+type Described struct {
+	Reason  string
+	Summary string
+	Cause   string
+	Where   string
+}
+
+// All returns every described reason, sorted by reason.
+//
+// It exists so the whole table can be handed over in one read. An agent that has a
+// screenful of events with unfamiliar reasons would otherwise need one Lookup per
+// reason, and the temptation at that point is to stop looking and guess — which is the
+// exact failure this package exists to prevent.
+func All() []Described {
+	out := make([]Described, 0, len(entries))
+	for reason, entry := range entries {
+		out = append(out, Described{
+			Reason: reason, Summary: entry.Summary, Cause: entry.Cause, Where: entry.Where,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Reason < out[j].Reason })
+	return out
+}
