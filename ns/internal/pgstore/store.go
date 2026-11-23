@@ -61,12 +61,40 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // Close releases the pool.
 func (s *Store) Close() { s.pool.Close() }
 
+// Compile-time proof that this type satisfies every port the engine can be wired
+// with. These exist because a field of engine.Store is an interface, and an
+// interface left unset is a perfectly valid zero value: nothing fails to compile,
+// nothing fails to start, and the API simply answers 503 at runtime.
+//
+// That is how device models went missing from every PostgreSQL deployment since
+// this file was written. internal/pgstore/models.go implemented all four
+// ModelRepo methods, migration 011 created the table, and the one line that
+// connected them to the bundle was never added. The in-memory store does set it,
+// so every test that ran against memserver passed.
+var (
+	_ engine.DeviceRepo  = (*Store)(nil)
+	_ engine.SessionRepo = (*Store)(nil)
+	_ engine.Recorder    = (*Store)(nil)
+	_ engine.ModelRepo   = (*Store)(nil)
+	_ engine.AirtimeRepo = (*Store)(nil)
+	_ engine.SeenRepo    = (*Store)(nil)
+)
+
 // Store wires this implementation into the engine's port bundle.
+//
+// Every field must be set explicitly. Adding a port to engine.Store should be
+// accompanied by a line here and by the assertion above; wiring_test.go fails if
+// a port this type implements arrives as nil.
 func (s *Store) Store() engine.Store {
 	return engine.Store{
 		Devices:  s,
 		Sessions: s,
 		Recorder: s,
+		// Payload formatters live here. Without this line the models endpoints
+		// answer 503 and no device can be given a formatter, which makes the
+		// deployment read raw bytes forever while the console offers a Models
+		// page it cannot fill.
+		Models: s,
 		// The two optional books are what make duty-cycle accounting and frame
 		// de-duplication survive a restart or span processes.
 		Airtime: s,
