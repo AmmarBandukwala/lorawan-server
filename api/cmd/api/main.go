@@ -71,7 +71,11 @@ func main() {
 	if address == "" {
 		address = ":8080"
 	}
-	app := httpapi.New(postgres.New(pool), provisioner, controller)
+	app := httpapi.New(postgres.New(pool), provisioner, controller,
+		// The console checks whether an MCP listener is there so the Agents page
+		// can say so truthfully. Unset means no listener, which the page reports
+		// as its own state rather than as a failure — see httpapi.AgentAccess.
+		httpapi.WithAgentAccess(httpapi.NewAgentAccess(os.Getenv("MCP_URL"))))
 	server := &http.Server{
 		Addr:              address,
 		Handler:           app.Handler(),

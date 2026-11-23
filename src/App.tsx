@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import {
-  Activity, ArrowLeftRight, Bell, Boxes, Braces, Menu, Radio, RadioTower, RefreshCw, Settings2,
+  Activity, ArrowLeftRight, Bell, Bot, Boxes, Braces, Menu, Radio, RadioTower, RefreshCw,
+  Settings2,
 } from 'lucide-react'
 import { PageHeadingAction, SettingsForm } from './features/network/components'
+import { Agents } from './features/network/panels/Agents'
 import { DeviceModels } from './features/network/panels/DeviceModels'
 import { Integrations } from './features/network/panels/Integrations'
 import { RegisterDeviceDialog } from './features/network/panels/RegisterDeviceDialog'
@@ -21,7 +23,12 @@ import './App.css'
 const navigation: { name: View; icon: typeof Activity }[] = [
   { name: 'Overview', icon: Activity }, { name: 'Devices', icon: Boxes },
   { name: 'Gateways', icon: RadioTower }, { name: 'Models', icon: Braces },
-  { name: 'Integrations', icon: ArrowLeftRight }, { name: 'Events', icon: Radio },
+  { name: 'Integrations', icon: ArrowLeftRight },
+  // Agents sits with Integrations rather than at the end because it is the same
+  // kind of thing — a way out of the network to something the operator runs — and
+  // it is the one entry whose page describes a service this console cannot control.
+  { name: 'Agents', icon: Bot },
+  { name: 'Events', icon: Radio },
 ]
 
 function App() {
@@ -159,6 +166,11 @@ function App() {
     Settings: 'Facility profile and operator display settings.',
     Models: 'Sensor types, and how their payloads are turned into readings.',
     Integrations: 'Push each decoded reading to your own systems as it arrives.',
+    // Named rather than left to the generic sentence, because the generic one would
+    // claim this page is "connected to your local network server" — and the whole
+    // point of this page is that the service it describes is a third process the
+    // console can neither configure nor vouch for.
+    Agents: 'Let an agent read the network over the Model Context Protocol.',
   }
 
   const title = view === 'Overview' ? 'Network overview' : view
@@ -350,6 +362,7 @@ function App() {
           {view === 'Gateways' && <GatewaysView status={status} gateways={gateways} unheardGateways={unheardGateways} />}
           {view === 'Models' && <DeviceModels decoding={status?.decoding} />}
           {view === 'Integrations' && <Integrations />}
+          {view === 'Agents' && <Agents />}
           {view === 'Events' && <EventsView events={events} />}
           {view === 'Settings' && <SettingsForm
             draft={settingsDraft}

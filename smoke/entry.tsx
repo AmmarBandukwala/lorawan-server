@@ -6,6 +6,8 @@ import { ActivityItem, DeviceHeader, DeviceTable, GatewayCard, PageHeadingAction
 import { DeviceConsole } from '../src/features/network/panels/DeviceConsole'
 import { DeviceSettings } from '../src/features/network/panels/DeviceSettings'
 import { DeviceModels } from '../src/features/network/panels/DeviceModels'
+import { Agents } from '../src/features/network/panels/Agents'
+import { StatusPanel } from '../src/features/network/panels/Agents'
 import { IntegrationEditor, Integrations } from '../src/features/network/panels/Integrations'
 import { GatewayConnectPanel, LiveGatewayCard } from '../src/features/network/panels/Gateways'
 import { DecodeHealthPanel, NetworkServerPanel } from '../src/features/network/panels/NetworkHealth'
@@ -21,6 +23,16 @@ import { GatewaysView } from '../src/features/network/views/GatewaysView'
 import { OverviewView } from '../src/features/network/views/OverviewView'
 import { DevicesView } from '../src/features/network/views/DevicesView'
 import { DEVICE_FILTERS, endpointFor, transportLabel, UNASSIGNED_GROUP, viewOffersDeviceRegistration } from '../src/features/network/constants'
+import {
+  AGENT_NEVER_ALLOWED, AGENT_TOOLS, MCP_DEFAULT_HTTP_PORT, MCP_ENDPOINT_PATH,
+  MCP_TOKEN_PLACEHOLDER, NS_TOKEN_PLACEHOLDER, agentEndpointFor, httpAccessSnippet,
+  stdioConfigSnippet,
+} from '../src/features/network/constants'
+import {
+  AGENT_STATE_ACTION, AGENT_STATE_HEADLINE, agentAccessState,
+} from '../src/features/network/control/agentAccess'
+import { readSettings } from '../src/features/network/snapshot'
+import type { AgentAccessReport } from '../src/features/network/control/agentAccess'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
 import { CommandRejected, failureMessage, isNotFound, isServerUnavailable } from '../src/features/network/control/http'
 import type { GatewayHealth } from '../src/features/network/control/types'
@@ -506,7 +518,7 @@ check('the counters say what they cover', cleanHtml, 'Only models that have sent
 // ---------------------------------------------------------------------------
 
 const deviceViews: View[] = ['Devices']
-const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Integrations', 'Settings']
+const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Integrations', 'Agents', 'Settings']
 for (const view of deviceViews) {
   assert(`the heading offers device registration on ${view}`, viewOffersDeviceRegistration(view))
 }
@@ -685,6 +697,184 @@ assert('the shell renders no caret that opens nothing', !shell.includes('More ac
 assert('window captions are captions, not fake dropdowns', !shell.includes('select-button'))
 check('the Overview still states its window', overviewHtml, 'Last 24 hours')
 check('the Events view still states its order', eventsHtml, 'Most recent')
+
+// ---------------------------------------------------------------------------
+// The Agents page: the one page that describes a service this console cannot
+// control, so the checks are about what it is allowed to claim.
+// ---------------------------------------------------------------------------
+
+// Effects do not run under renderToString, so this is the pre-read render. The page
+// must not announce a state it has not established: "not enabled on this deployment"
+// and "cannot be checked right now" are both findings, and rendering either before the
+// request has returned is the mistake the other panels already guard against.
+const agentsHtml = renderToString(h(Agents))
+check('the Agents page renders its status panel', agentsHtml, 'Agent access')
+check('the Agents page starts by saying it is checking', agentsHtml, 'Checking…')
+assert('the Agents page declares no state before the read has returned',
+  !agentsHtml.includes('Not enabled on this deployment') &&
+  !agentsHtml.includes('Cannot be checked right now') &&
+  !agentsHtml.includes('Running and reachable'))
+
+// Every state has words and an action. The Record makes the coverage a compile-time
+// check, so what is asserted here is the part a Record cannot catch: that no state was
+// given a placeholder string.
+const agentStates = ['checking', 'not-configured', 'reachable', 'unreachable', 'unknown'] as const
+for (const state of agentStates) {
+  assert(`state ${state} has a headline and an action`,
+    (AGENT_STATE_HEADLINE[state] ?? '').length > 3 &&
+    (AGENT_STATE_ACTION[state] ?? '').length > 10)
+}
+
+const agentReport = (over: Partial<AgentAccessReport>): AgentAccessReport => ({
+  configured: true, reachable: true, endpoint: 'http://10.0.0.4:8092',
+  detail: '', checked_at: '2026-11-17T10:00:00Z', ...over,
+})
+assert('a listener that was never configured is its own state, not a failure',
+  agentAccessState(agentReport({ configured: false, reachable: false }), 'done') === 'not-configured')
+assert('configured and answering is reachable',
+  agentAccessState(agentReport({}), 'done') === 'reachable')
+assert('configured and silent is unreachable, not merely unknown',
+  agentAccessState(agentReport({ reachable: false, detail: 'connection refused' }), 'done') === 'unreachable')
+// The distinction that sends an operator to the right container: the console failing
+// to ask is not evidence about the listener.
+assert('a read that never arrived is unknown, never reported as not running',
+  agentAccessState(null, 'failed') === 'unknown')
+assert('an outstanding read is checking, not unknown',
+  agentAccessState(null, 'checking') === 'checking')
+
+// The endpoint an operator pastes into another machine. Built from the browser's host,
+// because the API's container address resolves to nothing out there — and a blank host
+// must stay visibly a placeholder rather than become a URL that looks usable.
+assert('a blank host leaves a placeholder rather than a half-built URL',
+  agentEndpointFor('', '8092') === `http://HOST:8092${MCP_ENDPOINT_PATH}`)
+assert('the default port is the one compose publishes',
+  agentEndpointFor('10.0.0.4', MCP_DEFAULT_HTTP_PORT) === `http://10.0.0.4:8092${MCP_ENDPOINT_PATH}`)
+// The listener serves plain HTTP, so the builder emits plain HTTP. An operator putting
+// TLS in front edits the scheme themselves; silently emitting https:// would produce a
+// config that fails against the listener as actually deployed.
+assert('a standard port is not repeated in the URL',
+  agentEndpointFor('node.example', '443') === `http://node.example${MCP_ENDPOINT_PATH}`)
+assert('surrounding spaces do not survive into a copied address',
+  agentEndpointFor('  10.0.0.4  ', '  8092  ') === agentEndpointFor('10.0.0.4', '8092'))
+
+// The generated configs. The load-bearing property is that no secret is ever rendered:
+// the console does not hold either token, and a page that fetched one to be helpful
+// would dissolve the separation between this listener and the network server's API.
+const stdio = stdioConfigSnippet('fieldnode-mcp', 'http://HOST:8091', 'http://HOST:8090')
+assert('the stdio config is JSON an agent host can read verbatim',
+  stdio.includes('"mcpServers"') && stdio.includes('"command": "fieldnode-mcp"'))
+assert('the stdio config carries both upstream addresses',
+  stdio.includes('http://HOST:8091') && stdio.includes('http://HOST:8090'))
+assert('the stdio config puts a placeholder where a token belongs',
+  stdio.includes(NS_TOKEN_PLACEHOLDER))
+assert('a placeholder is obviously a placeholder, not a finished value',
+  NS_TOKEN_PLACEHOLDER.startsWith('PASTE_') && MCP_TOKEN_PLACEHOLDER.startsWith('PASTE_'))
+assert('no token-shaped value is rendered anywhere on the page',
+  !/[0-9a-f]{32}/.test(agentsHtml))
+const httpSnippet = httpAccessSnippet('http://10.0.0.4:8092/mcp')
+assert('the network config states the endpoint and the scheme, and invents no file format',
+  httpSnippet.includes('endpoint: http://10.0.0.4:8092/mcp') &&
+  httpSnippet.includes('Authorization: Bearer '))
+
+// The capability table. It describes the software rather than the deployment, so the
+// page has to say that on the same screen as the list.
+check('the capability table states that it is not live state', agentsHtml, 'not what is switched on here')
+check('the capability table names the setting that gates writes', agentsHtml, 'MCP_PROFILE')
+assert('every tool in the table is rendered',
+  AGENT_TOOLS.every((tool) => agentsHtml.includes(tool.name)))
+assert('a write is badged differently from a read',
+  agentsHtml.includes('Changes the network') && agentsHtml.includes('Read only'))
+assert('the exclusions are listed rather than left to be inferred',
+  AGENT_NEVER_ALLOWED.every((item) => agentsHtml.includes(item.what)))
+check('the page says a provisioning key must not transit an agent', agentsHtml, 'AppKey')
+check('the page says nothing here forces a human to approve', agentsHtml, 'forces a human to approve')
+check('the page says a downlink is queued rather than sent', agentsHtml, 'queued, never sent')
+check('the page warns that the endpoint is plain HTTP', agentsHtml, 'readable by anyone')
+
+// Dead controls. Every button here does something: one re-check and one copy per
+// config block. A tool row rendered as a button would promise a page that does not
+// exist, on the one screen whose job is saying what is and is not possible.
+assert('the Agents page renders exactly three buttons, and all three are wired',
+  agentsHtml.split('<button').length - 1 === 3)
+assert('capability rows are styled as read rather than clickable',
+  agentsHtml.includes('agent-tool-row') && agentsHtml.includes('agent-never-row'))
+
+// The heading must not offer device registration here: provisioning is deliberately
+// absent from every MCP profile, so an "Add device" button on the page that explains
+// why an agent cannot create a device would contradict its own content.
+assert('the Agents heading offers no device registration',
+  !viewOffersDeviceRegistration('Agents'))
+assert('the Agents heading renders no primary action at all',
+  renderToString(h(PageHeadingAction, {
+    view: 'Agents', canProvision: true, onAddDevice: noop,
+  })) === '')
+
+// A settings body is the one response whose fields the sidebar dereferences without a
+// guard, so a body missing one used to throw inside App and unmount the whole console
+// to a blank page. Coercion, not trust: a wrong type is as absent as a missing key.
+assert('a full settings body survives intact',
+  readSettings({
+    configured: true, facilityName: 'North Depot', region: 'EU868',
+    operatorName: 'Ada Lovelace', operatorRole: 'Operator',
+  }).operatorName === 'Ada Lovelace')
+assert('a body missing the operator name yields an empty string, not undefined',
+  readSettings({ configured: true, facilityName: 'North Depot' }).operatorName === '')
+assert('a snake_case body does not crash the console',
+  readSettings({ operator_name: 'Ada' }).operatorName === '')
+assert('a null body still produces a complete settings object',
+  readSettings(null).facilityName === '' && readSettings(undefined).configured === false)
+assert('a non-string field is not passed through to be dereferenced later',
+  readSettings({ operatorName: 42 }).operatorName === '')
+assert('configured is only true when it is exactly true',
+  readSettings({ configured: 'yes' }).configured === false)
+
+// Which lines each Agents state is allowed to show. The panel had two defects here
+// that only show up in the least-exciting state: it rendered the API's guidance ("set
+// MCP_URL…") in the same red it uses for a genuine failure, and it printed "Checked
+// /healthz on no address" for a deployment where nothing was configured and nothing
+// was probed.
+const statusProps = { loading: false, onRecheck: noop, loadError: '' }
+const notConfiguredHtml = renderToString(h(StatusPanel, {
+  ...statusProps, state: 'not-configured',
+  report: agentReport({
+    configured: false, reachable: false, endpoint: '',
+    detail: 'this console was not told where an MCP listener is; set MCP_URL on the console API',
+  }),
+}))
+assert('a deployment that never configured a listener is not dressed as a failure',
+  !notConfiguredHtml.includes('role="alert"'))
+assert('a deployment that never configured a listener does not claim a probe ran',
+  !notConfiguredHtml.includes('Checked /healthz'))
+assert('the not-configured state still names the state and its remedy',
+  notConfiguredHtml.includes('Not enabled on this deployment') &&
+  notConfiguredHtml.includes('--profile mcp'))
+
+const unreachableHtml = renderToString(h(StatusPanel, {
+  ...statusProps, state: 'unreachable',
+  report: agentReport({ reachable: false, detail: 'nothing is listening at http://mcp:8092' }),
+}))
+assert('a configured listener that will not answer IS reported as a failure',
+  unreachableHtml.includes('role="alert"') &&
+  unreachableHtml.includes('nothing is listening at http://mcp:8092'))
+assert('the unreachable state still says what was probed and when',
+  unreachableHtml.includes('Checked /healthz on http://10.0.0.4:8092'))
+
+const reachableHtml = renderToString(h(StatusPanel, {
+  ...statusProps, state: 'reachable', report: agentReport({}),
+}))
+assert('a reachable listener shows no alert', !reachableHtml.includes('role="alert"'))
+assert('the reachable state names the address it measured',
+  reachableHtml.includes('Running and reachable') &&
+  reachableHtml.includes('<code>http://10.0.0.4:8092</code>'))
+
+// The console failing to reach its own API must blame the console, not the listener.
+const unknownHtml = renderToString(h(StatusPanel, {
+  ...statusProps, state: 'unknown', report: null, loadError: 'Failed to fetch',
+}))
+assert('an unanswerable check reports the console’s own failure, not the listener’s',
+  unknownHtml.includes('Cannot be checked right now') &&
+  unknownHtml.includes('Failed to fetch') &&
+  !unknownHtml.includes('Not enabled on this deployment'))
 
 let failed = 0
 for (const [name, ok] of checks) {

@@ -10,6 +10,7 @@
  * it anyway.
  */
 export { ActivityItem } from './ActivityItem'
+export { CopyValue } from './CopyValue'
 export { DeviceHeader, DeviceTable } from './DeviceList'
 export { Gateway, GatewayCard } from './GatewaySignal'
 export { PageHeadingAction } from './PageHeadingAction'

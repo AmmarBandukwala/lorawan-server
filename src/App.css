@@ -406,6 +406,57 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
 .connect-steps li { color: #96a09a; font-size: 9px; line-height: 1.45; }
 .connect-steps b { display: block; color: #4a564e; font-size: 10px; }
 
+/* Copying a value that spans several lines.
+ *
+ * The single-line form above puts the value and the button on one row, which stops
+ * working the moment the value has line breaks: a config block whose newlines
+ * collapsed would copy as one line and fail in the other machine with no clue why,
+ * so the block is a <pre> and the button moves to a header row of its own. */
+.copy-value-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.copy-value-label { color: #96a09a; font-size: 9px; }
+.copy-value-block {
+  margin: 0; padding: 9px 10px; overflow-x: auto; border: 1px solid var(--line);
+  border-radius: 6px; background: #fff; color: #2c6a52; font: 10px/1.55 var(--mono);
+  white-space: pre;
+}
+
+/* The Agents page.
+ *
+ * The state row is the one measured fact on the page, so it is the only thing on it
+ * allowed to look like a status: everything else describes the software rather than
+ * this deployment, and mixing the two is how an operator ends up believing writes are
+ * switched on because a table listed a write tool. */
+.agent-status { display: flex; flex-direction: column; gap: 11px; padding: 18px; }
+.agent-state-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.agent-state-row code {
+  padding: 4px 8px; border-radius: 5px; background: #fff; border: 1px solid var(--line);
+  color: #2c6a52; font: 10px var(--mono); word-break: break-all;
+}
+.agent-action { color: #556259; font-size: 10px; line-height: 1.5; }
+
+/* The address an agent is pointed at, built from two fields the operator can
+ * correct. The port is narrow because it holds a number and a wide box beside a
+ * hostname reads as part of the hostname. */
+.agent-address { display: grid; grid-template-columns: minmax(0, 1fr) 110px; gap: 9px; }
+.agent-address label { display: flex; flex-direction: column; gap: 4px; }
+.agent-address span { color: #96a09a; font-size: 9px; }
+.agent-address input {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  color: var(--ink); font: 11px var(--mono);
+}
+.agent-address input:focus { outline: 1px solid #9fc3b1; border-color: #9fc3b1; }
+
+/* Two states the existing pills cannot express.
+ *
+ * "Configured but not answering" takes the console's amber, the colour it already
+ * uses for a setting that carries a consequence — it is a fault, but a known one.
+ * "Cannot be established" is grey with a dashed edge: it is the absence of a finding
+ * rather than one, and giving it the same solid warning treatment as a broken service
+ * sends the operator to debug the MCP container when the console is the thing that
+ * could not be reached. */
+.state-alert { color: #8a6a3a; background: #fdf6ec; }
+.state-unknown { color: #7d877f; background: #f4f6f4; border: 1px dashed #cfd8d1; }
+
 .gateway-view { display: flex; flex-direction: column; gap: 13px; }
 .gateway-view .gateway-grid-full { margin-top: 0; }
 .gateway-eui { margin-left: 6px; color: #96a09a; font: 9px var(--mono); font-weight: 400; }
@@ -440,6 +491,35 @@ h1 { color: #25322c; font-size: 24px; font-weight: 650; letter-spacing: 0; line-
    badge, because a model can look fully configured here while every frame from
    its devices is stored as unreadable bytes. */
 .model-codec-broken { background: #fbeceb; color: #a34e43; font-weight: 600; }
+
+/* The Agents page's tool table, which reuses the model rows.
+ *
+ * These sit after the rules they modify and repeat the shared class in the selector.
+ * Both matter: `.model-row` and `.agent-tool-row` have equal specificity, so written
+ * earlier these three overrides lost the cascade silently and every read-only row kept
+ * a pointer cursor and a hover highlight — a dead control on every line of the one
+ * table whose job is saying what is and is not possible. Naming both classes means a
+ * future reordering cannot undo it again without noticing. */
+.model-row.agent-tool-row, .model-row.agent-never-row { cursor: default; }
+.model-row.agent-tool-row:hover, .model-row.agent-never-row:hover {
+  border-color: var(--line); background: var(--canvas);
+}
+.model-row.agent-tool-row .model-row-main small,
+.model-row.agent-never-row .model-row-main small { white-space: normal; color: #7d877f; }
+
+/* A write is not an error, so it is not coloured like one — but it must not read as
+ * the same kind of row as a read either. Amber is the console's existing "this has a
+ * consequence" colour. */
+.model-codec.model-codec-writes { background: #fdf6ec; color: #8a6a3a; font-weight: 600; }
+/* Deliberately unavailable, not broken. The console's red means something has failed;
+ * these are design decisions that will not change, and a wall of red pills would read
+ * as a page of faults an operator is being asked to go and fix. */
+.model-codec.model-codec-none { background: #f1f4f1; color: #66736b; }
+
+/* Two config cards of very different heights side by side. The shared grid stretches
+ * them to match, which leaves the shorter one with a large blank area that reads as
+ * missing content; cards of their own height read as two finished things. */
+.agent-connect-grid { align-items: start; }
 
 .model-editor { display: flex; flex-direction: column; gap: 13px; padding: 16px; }
 .model-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }

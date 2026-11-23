@@ -295,12 +295,57 @@ there is no idle session to leak.
 - **No rate limit**, stated rather than silently absent: a useful one needs to know which
   caller is which, and one shared bearer token cannot distinguish two of them.
 
+## PR 6 — the console's Agents page — done
+
+The plan never included console work; it was added because an operator had no way to
+find out this service existed, let alone whether it was running.
+
+| File | Change |
+|---|---|
+| `api/internal/httpapi/agentaccess.go` | `AgentAccess` port, `mcpProber`, `GET /api/v1/mcp`. Answers 200 even when the listener is down: the console API is healthy in that moment — it established that something else is not — and a 503 would land in the frontend's generic "API unavailable" path and send the operator to debug the wrong container. |
+| `src/features/network/control/agentAccess.ts` | The fetch, the five states, and the words and remedy for each. |
+| `src/features/network/panels/Agents.tsx` | Status, two generated client configs, the tool table, and four limits. |
+| `src/features/network/components/CopyValue.tsx` | Extracted from the gateways panel rather than duplicated, so two places cannot disagree about whether a copy succeeded. |
+| `src/features/network/constants.ts` | The tool table and the config builders, kept out of the component file per the repo's Fast Refresh rule. |
+| `mcp/internal/tools/console_test.go` | Three drift guards reading the console's constants file as text. |
+
+### What PR 6 changed relative to the obvious design
+
+- **The console never holds a token.** Generated configs carry
+  `PASTE_MCP_AUTH_TOKEN_FROM_ENV` and `PASTE_NS_API_TOKEN_FROM_ENV`. Fetching the real
+  value would have been more helpful for one afternoon and would have dissolved the
+  separation between this listener and the network server's API.
+- **The endpoint is built from the browser's host, not the API's.** The console API knows
+  `http://mcp:8092`; an agent on an operator's laptop cannot resolve that. Only the
+  browser knows a name its own machine can reach, and even that is shown beside an
+  editable field because it may be behind a published port or a proxy.
+- **`MCP_PROFILE` is not read, because it cannot be.** The tool table describes this
+  build and says so on the same screen as the list. A page that presented a static
+  capability table as live state would let an operator conclude writes are on because a
+  row named `patch_device` was there.
+- **Four states, not three.** `checking` was added after the first render announced
+  "cannot be checked right now" about a request that had not returned yet. `unknown`
+  then means what it should: the console could not reach its own API, which is evidence
+  about the console and none about this service.
+- **`MCP_URL` defaults to empty.** Pointing the console at a container that was never
+  started makes the page report a service as broken for a deployment that does not run
+  one, which is the wrong remedy to send someone off with.
+- **The tool table is pinned from this module.** `TestConsoleListsExactlyTheToolsThisServerRegisters`,
+  `TestConsoleMarksEveryWriteAsAWrite` and `TestConsoleNeverAllowedListIsStillTrue` read
+  `src/features/network/constants.ts` as text. Nothing else can: the two share no code,
+  and a write mislabelled as a read on the one page whose job is saying what an agent may
+  do is the failure that matters. Verified by mutation — flipping `patch_device` to
+  `writes: false` produced a failure naming the tool and the file.
+
 ## Verification
 
 ```sh
 cd mcp && make test vet fmt     # Docker, golang:1.25, repo root mounted
 cd ns  && make test             # PR 1 handlers, against real engine state
 cd ns  && make test-pg          # RecentEvents against a real PostgreSQL
+cd api && go test ./...         # the /api/v1/mcp handler and its failure wording
+npm run smoke                   # console render + logic assertions, no browser needed
+npm run lint && npm run build
 ./check-stale-refs.sh
 ```
 
@@ -336,7 +381,7 @@ that names files it intends to create fails the check it is supposed to pass. Fi
 that exist are written by their full path; the `mcp/` tree PR 2 would create was
 outside the guard's patterns by construction, and its paths were written as planned.
 
-PR 1's and PR 2's files now exist, so their paths are anchored — which is the point:
-the guard goes green when the plan becomes code, and red if it drifts. PR 3 to PR 5
-still describe files that do not exist, so anything naming one stays module-relative
-until it lands.
+PR 1 through PR 6 have all landed, so every path in this file is anchored — which is
+the point: the guard goes green when the plan becomes code, and red if it drifts. The
+`mcp/` tree PR 2 would create was outside the guard's patterns by construction, and its
+paths were written as planned before any of it existed.

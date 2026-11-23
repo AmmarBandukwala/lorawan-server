@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ArrowUpRight, Check, CircleCheck, Copy, Info, RadioTower, ShieldAlert } from 'lucide-react'
+import { ArrowUpRight, CircleCheck, Info, RadioTower, ShieldAlert } from 'lucide-react'
+import { CopyValue } from '../components/CopyValue'
 import { endpointFor, transportLabel } from '../constants'
 import type { GatewayHealth, GatewayListener } from '../control/types'
 
@@ -106,50 +106,12 @@ export function GatewayConnectPanel({ listeners, transports }: {
  * different endpoints, and a single "copy endpoint" button would have to guess
  * which one the operator meant.
  *
- * When the clipboard is unavailable the panel says so and tells the operator to
- * select the text. Browsers only expose it in a secure context, so a console
- * reached over a plain-HTTP LAN address genuinely cannot use it — reporting
- * success in that case would be the worst outcome available, because the
- * operator would paste nothing into the gateway's config and go looking for a
- * radio problem.
+ * The clipboard handling itself is CopyValue's, shared with the Agents page. It
+ * used to be inline here, and a second copy of it elsewhere would be how one place
+ * ends up reporting a successful copy that never happened.
  */
 function Endpoint({ transport, value, note }: { transport: string; value: string; note: string }) {
-  const [copied, setCopied] = useState<'idle' | 'done' | 'unavailable'>('idle')
-
-  async function copy() {
-    // Read defensively: navigator.clipboard is absent entirely outside a secure
-    // context, and writeText rejects if the document has lost focus.
-    if (!navigator.clipboard?.writeText) {
-      setCopied('unavailable')
-      return
-    }
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied('done')
-    } catch {
-      setCopied('unavailable')
-    }
-  }
-
-  return (
-    <div className="connect-endpoint">
-      <div className="connect-endpoint-line">
-        <code>{value}</code>
-        <button className="copy-endpoint" type="button" onClick={() => void copy()}
-          aria-label={`Copy the ${transportLabel(transport)} endpoint`}>
-          {copied === 'done' ? <Check size={12} /> : <Copy size={12} />}
-          {copied === 'done' ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <span>{note}</span>
-      {copied === 'unavailable' && (
-        <p className="connect-note">
-          <Info size={13} /> This browser will not hand out the clipboard over an
-          insecure origin. Select the address above and copy it manually.
-        </p>
-      )}
-    </div>
-  )
+  return <CopyValue value={value} note={note} label={`the ${transportLabel(transport)} endpoint`} />
 }
 
 /**

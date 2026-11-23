@@ -123,6 +123,51 @@ upstreams over the internal network, and health-checks itself with
 `fieldnode-mcp -healthz` — the runtime image is distroless, so the binary has to be its
 own probe. See `.env.example` for `MCP_AUTH_TOKEN` and `MCP_PROFILE`.
 
+### The console's Agents page
+
+The console has a page for this service, under **Agents** in the sidebar. It shows four
+things: whether a listener answers `/healthz`, two ready-to-paste client configs, the
+full tool table with a read/write badge on each, and the four limits an operator should
+read before pointing an agent at a live network.
+
+Two things it cannot do, which is why the page says them out loud rather than leaving
+them to be inferred:
+
+- **It cannot read this process's configuration.** `MCP_PROFILE` lives in the MCP
+  container's environment and the console has no way to see it, so the tool table
+  describes what *this build* offers and states that which of them are live depends on a
+  setting the page cannot see. It never presents the table as live state.
+- **It cannot hold either token.** The generated configs carry `PASTE_MCP_AUTH_TOKEN_FROM_ENV`
+  and `PASTE_NS_API_TOKEN_FROM_ENV` rather than real values. A console that fetched a
+  secret to save the operator a step would dissolve the separation between this listener
+  and the network server's API — the separation that exists because one leak would
+  otherwise open both.
+
+For the page to report anything other than "not enabled on this deployment", it has to
+be told where to look. That is a **separate variable from the MCP service's own config**,
+because the console reaches the listener over the internal network while an agent reaches
+it through whatever address the operator's machine can resolve:
+
+```
+MCP_URL=http://mcp:8092
+```
+
+Set it in `.env` alongside `MCP_AUTH_TOKEN` and restart the `api` service. Leaving it
+unset is the honest default: the page then reports that this deployment has no listener,
+rather than reporting a service as broken because nothing answers a name that was never
+started.
+
+The page distinguishes four states, because each has a different remedy: not configured,
+reachable, configured-but-not-answering, and *cannot be established* — the last meaning
+the console could not reach its own API, which says nothing whatever about this service
+and sends the operator to the console's logs instead.
+
+The tool table is pinned against this module by `TestConsoleListsExactlyTheToolsThisServerRegisters`
+and its two companions in `internal/tools/console_test.go`, which read
+`src/features/network/constants.ts` as text. The console and this server share no code, so
+without that guard a renamed tool would leave the page describing something that no longer
+exists — and a write mislabelled as a read is the failure that actually matters.
+
 ## The tools
 
 | Tool | What it answers |

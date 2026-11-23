@@ -95,6 +95,28 @@ while every frame from them is stored as unreadable bytes — so the **Models** 
 also reports what the server actually managed to decode, and names the models
 whose script it could not compile along with the compiler's message.
 
+## Let an agent read the network
+
+An optional third service speaks the Model Context Protocol, so an agent can be
+asked "why has tank 3 not reported today" and answer it from the live network
+rather than from guesses. It is off unless started, because it is a door in:
+
+```sh
+docker compose --profile mcp up -d
+```
+
+The console has an **Agents** page for it: whether a listener is answering, two
+paste-ready client configs, every tool with a read/write badge on it, and the
+limits worth reading before pointing an agent at a live network. It never shows a
+token — the configs carry placeholders, because a console that held the listener's
+secret would undo the separation between it and the network server's API.
+
+By default an agent can only read. `MCP_PROFILE=operate` adds queueing a downlink,
+cancelling one, asking a device for a battery report and changing a device's
+configuration. Creating a device, changing an event destination and installing a
+payload formatter are in no profile: `mcp/README.md` explains why those are
+excluded rather than merely gated.
+
 ## Try it without radio hardware
 
 `ns/cmd/nsbench` simulates a gateway and a class-A device against a running
@@ -157,6 +179,7 @@ Rules that exist because each was learned the hard way:
 ns/            network server — protocol codec, regions, engine, gateway
                transport, integrations, provisioning API (see ns/README.md)
 api/           console API: reads ns_* tables, provisions through the ns API
+mcp/           optional MCP server for agents — its own module and go.mod
 src/           React console
 db/            database bootstrap (schema is owned by the services' migrations)
 ```

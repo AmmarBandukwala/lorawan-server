@@ -108,6 +108,15 @@ services:
       # Health is read from the ns's status port, not the API port: /status is
       # served there and is not behind the API token.
       NS_STATUS_URL: http://ns:8090
+      # Where to look for an MCP listener, so the Agents page can report whether one
+      # is answering instead of guessing.
+      #
+      # Empty by default, and deliberately so. The MCP service runs only under its own
+      # compose profile, and pointing this at a container that was never started would
+      # make the page say "configured, but not answering" about a deployment that
+      # simply does not run one — which is the wrong remedy to send someone off with.
+      # Set it in .env alongside MCP_AUTH_TOKEN when you do start the profile.
+      MCP_URL: ${MCP_URL:-}
     depends_on:
       db:
         condition: service_healthy

@@ -129,3 +129,152 @@ export const API_PREFIX = '/api/v1'
 export function viewOffersDeviceRegistration(view: View): boolean {
   return view === 'Devices'
 }
+
+/**
+ * The default port the MCP listener is published on.
+ *
+ * Mirrors `MCP_HTTP_PORT` in compose. Repeated here because the console cannot read
+ * the deployment's environment, and the page is generating a URL for an operator to
+ * paste into another machine's config — a blank field they have to look up is a
+ * field they will get wrong.
+ */
+export const MCP_DEFAULT_HTTP_PORT = '8092'
+
+/**
+ * Where an agent points at the MCP listener.
+ *
+ * Built from the host the *browser* used, not from anything the API reports, and
+ * that distinction is why this sits beside an editable field rather than being read
+ * from the server. The console API knows the listener's container address
+ * (`http://mcp:8092`); an agent on an operator's laptop cannot resolve that. Only
+ * the browser knows a hostname its own machine can reach — and even that is a guess
+ * to confirm, since the listener may be reached through a published port, a reverse
+ * proxy, or a different host entirely.
+ */
+export function agentEndpointFor(host: string, port: string): string {
+  const cleanHost = host.trim()
+  const cleanPort = port.trim()
+  const suffix = cleanPort && cleanPort !== '80' && cleanPort !== '443' ? `:${cleanPort}` : ''
+  return `http://${cleanHost || 'HOST'}${suffix}${MCP_ENDPOINT_PATH}`
+}
+
+/**
+ * Paths on the MCP listener. Named so the page can state exactly what it checked
+ * rather than saying "the health endpoint" and leaving the operator to find it.
+ */
+export const MCP_ENDPOINT_PATH = '/mcp'
+export const MCP_HEALTH_PATH = '/healthz'
+
+/**
+ * Placeholders in a generated config.
+ *
+ * Deliberately placeholders, never real values. The console does not hold either
+ * token and must not: the MCP token is separate from the network server's precisely
+ * so that leaking one does not open both, and a console that fetched a secret to be
+ * helpful would dissolve that split while looking like it was saving a step. A
+ * placeholder that is obviously a placeholder gets filled in; a field that looks
+ * finished does not get checked.
+ */
+export const MCP_TOKEN_PLACEHOLDER = 'PASTE_MCP_AUTH_TOKEN_FROM_ENV'
+export const NS_TOKEN_PLACEHOLDER = 'PASTE_NS_API_TOKEN_FROM_ENV'
+
+/**
+ * A config for an MCP host that spawns the server as a child process.
+ *
+ * The common case, and the one with no network exposure: whoever can start the
+ * process can use the token, so there is no second access control to get wrong.
+ */
+export function stdioConfigSnippet(command: string, apiURL: string, statusURL: string): string {
+  return JSON.stringify({
+    mcpServers: {
+      fieldnode: {
+        command,
+        env: {
+          NS_API_URL: apiURL,
+          NS_STATUS_URL: statusURL,
+          NS_API_TOKEN: NS_TOKEN_PLACEHOLDER,
+        },
+      },
+    },
+  }, null, 2)
+}
+
+/**
+ * A config for an MCP host that connects over the network.
+ *
+ * Two lines rather than a JSON blob, because HTTP-capable hosts differ widely in
+ * shape and there is no standard client config the way there is for a spawned
+ * command. Inventing one that looked authoritative would be worse than stating the
+ * two facts that are fixed: the URL, and that the scheme is Bearer.
+ */
+export function httpAccessSnippet(endpoint: string): string {
+  return [
+    `endpoint: ${endpoint}`,
+    `Authorization: Bearer ${MCP_TOKEN_PLACEHOLDER}`,
+  ].join('\n')
+}
+
+/**
+ * What an agent can do through the MCP listener, as the console words it.
+ *
+ * This describes **the software**, not the deployment: it is the same for every
+ * install of this build, which is why the page never presents it as live state.
+ * Whether writes are actually switched on is a per-deployment setting the console
+ * cannot see, and the page says so rather than implying it knows.
+ *
+ * The names are pinned against the Go server by a test in the mcp module that reads
+ * this file as text and fails if the two lists disagree. Nothing else can: the
+ * console and the MCP server share no code, so a renamed tool would otherwise leave
+ * this table confidently describing something that no longer exists — on the one page
+ * whose entire job is telling an operator what an agent is able to do.
+ */
+export type AgentTool = {
+  name: string
+  /** One line, in operator words rather than the tool's own description. */
+  summary: string
+  /** True when the tool changes something on the network. */
+  writes: boolean
+}
+
+export const AGENT_TOOLS: AgentTool[] = [
+  { name: 'network_status', summary: 'Band, uptime, every gateway and its counters, duty-cycle use', writes: false },
+  { name: 'list_devices', summary: 'The whole inventory, as the network server sees it', writes: false },
+  { name: 'get_device', summary: 'One device’s configuration', writes: false },
+  { name: 'get_device_session', summary: 'One device’s radio state: counters, data rate, signal, battery', writes: false },
+  { name: 'list_uplinks', summary: 'Recent uplinks with the formatter’s reading of them', writes: false },
+  { name: 'list_events', summary: 'The trace, including every frame the network refused and why', writes: false },
+  { name: 'list_models', summary: 'Device models and how their payloads are read', writes: false },
+  { name: 'get_model', summary: 'One model, including its formatter script', writes: false },
+  { name: 'list_integrations', summary: 'Where events are being delivered', writes: false },
+  { name: 'get_integration', summary: 'One destination in full', writes: false },
+  { name: 'explain_event_reason', summary: 'What a recorded reason means and what usually causes it', writes: false },
+  { name: 'diagnose_device', summary: 'Device, session, events, uplinks and network state in one answer', writes: false },
+  { name: 'enqueue_downlink', summary: 'Queue a frame for a device’s next RX window', writes: true },
+  { name: 'cancel_downlink', summary: 'Discard the frame waiting in that slot', writes: true },
+  { name: 'request_device_status', summary: 'Ask a device for battery and margin — it takes the same slot', writes: true },
+  { name: 'patch_device', summary: 'Change one device’s configuration', writes: true },
+]
+
+/**
+ * What no profile offers, whatever the deployment sets.
+ *
+ * Listed rather than omitted, because an operator who cannot find these in the table
+ * will assume they are there under another name and go looking for them.
+ */
+export const AGENT_NEVER_ALLOWED: { what: string; why: string }[] = [
+  {
+    what: 'Create or delete a device',
+    why: 'A provisioning request carries an AppKey. Routing it through a model puts '
+      + 'that key into a conversation transcript, which breaks the rule that keys go '
+      + 'in and never come out.',
+  },
+  {
+    what: 'Add, change or delete an event destination',
+    why: 'A destination the network delivers events to is an exfiltration channel and '
+      + 'a way to make the server send requests to arbitrary addresses.',
+  },
+  {
+    what: 'Install or edit a payload formatter',
+    why: 'A formatter is JavaScript that runs inside the network server’s own process.',
+  },
+]

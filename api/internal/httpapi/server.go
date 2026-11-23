@@ -56,6 +56,11 @@ type Server struct {
 	provisioner Provisioner
 	controller  Controller
 
+	// agentAccess is the MCP listener's health probe, or nil when this deployment
+	// has no listener. Optional by construction: the console is useful without it,
+	// and the page has a truthful thing to say either way.
+	agentAccess AgentAccess
+
 	// The band list the network server publishes, cached briefly so saving a
 	// facility profile does not pay a round trip. See supportedRegions.
 	regionMu      sync.Mutex
@@ -63,11 +68,31 @@ type Server struct {
 	regionCacheAt time.Time
 }
 
+// Option adjusts a Server at construction. It exists so an optional dependency can
+// be added without touching the call sites that pass three arguments.
+type Option func(*Server)
+
+// WithAgentAccess points the console at an MCP listener to check. A nil value is
+// ignored, so a caller can pass WithAgentAccess(NewAgentAccess(os.Getenv("MCP_URL")))
+// directly and let an unset variable mean "not configured".
+func WithAgentAccess(access AgentAccess) Option {
+	return func(s *Server) {
+		if access != nil {
+			s.agentAccess = access
+		}
+	}
+}
+
 // New builds the console API. provisioner and controller may be nil, which means
 // the console is running without a network server: reads still work and the
 // endpoints that need one answer 503 instead of inventing a success.
-func New(repository Repository, provisioner Provisioner, controller Controller) *Server {
-	return &Server{repository: repository, provisioner: provisioner, controller: controller}
+func New(repository Repository, provisioner Provisioner, controller Controller,
+	opts ...Option) *Server {
+	s := &Server{repository: repository, provisioner: provisioner, controller: controller}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
@@ -118,6 +143,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/integrations/{id}", s.deleteIntegration)
 	mux.HandleFunc("POST /api/v1/integrations/{id}/test", s.testIntegration)
 	mux.HandleFunc("GET /api/v1/uplinks", s.listUplinks)
+
+	// Whether an MCP listener is reachable. Read-only, and answered 200 even when
+	// the listener is down: the console established that fact, it did not fail.
+	mux.HandleFunc("GET /api/v1/mcp", s.getAgentAccess)
 	return withSecurityHeaders(mux)
 }
 

@@ -85,13 +85,44 @@ export async function loadNetworkSnapshot(
     if (result.ok) {
       // A section that legitimately returns nothing must not inherit stale
       // rows, so a success always replaces the value.
-      // @ts-expect-error each key's value type matches its own endpoint's
-      next[key] = result.value
+      if (key === 'settings') {
+        next.settings = readSettings(result.value)
+      } else {
+        // @ts-expect-error each key's value type matches its own endpoint's
+        next[key] = result.value
+      }
     } else {
       next.failed.push(key)
     }
   })
   return next
+}
+
+/**
+ * A facility-settings body coerced into the shape the console assumes.
+ *
+ * `fetchSection` casts parsed JSON to its declared type, which is a promise about a
+ * response nothing has checked. For the four list endpoints an unexpected member is
+ * invisible, but the settings object is read field by field in the sidebar, and one
+ * missing `operatorName` made `App.tsx` throw on `.split` — which does not degrade one
+ * panel, it unmounts the entire console to a blank page with no explanation. A console
+ * that cannot show its own connection status is the worst possible failure, because the
+ * operator has nothing left to look at.
+ *
+ * So the one section whose fields are dereferenced unguarded is normalised instead of
+ * trusted. Anything absent or of the wrong type arrives as the empty string, which the
+ * sidebar already knows how to word.
+ */
+export function readSettings(raw: unknown): FacilitySettings {
+  const body = (raw ?? {}) as Partial<FacilitySettings>
+  const text = (value: unknown) => (typeof value === 'string' ? value : '')
+  return {
+    configured: body.configured === true,
+    facilityName: text(body.facilityName),
+    region: text(body.region),
+    operatorName: text(body.operatorName),
+    operatorRole: text(body.operatorRole),
+  }
 }
 
 type SectionResult<T> = { ok: true; value: T } | { ok: false; error: string }
