@@ -1,6 +1,7 @@
-# golang:1.25, not the 1.24 the ns and api modules pin. The MCP Go SDK requires
-# go 1.25.0 from v1.8.0 onward, and the three modules are independent: ns/ and
-# api/ keep their own toolchain and are unaffected by this line.
+# golang:1.25, not the 1.24 the ns module pins. The MCP Go SDK requires go 1.25.0 from
+# v1.8.0 onward. The three modules are independent, so this line only covers mcp/: ns/
+# keeps 1.24 because nothing it imports asks for more, and api/ carries its own 1.25
+# pin in its Dockerfile now that the assistant imports the same SDK.
 GO_IMAGE ?= golang:1.25
 
 # The repository root, not this directory. Two tests read the network server's

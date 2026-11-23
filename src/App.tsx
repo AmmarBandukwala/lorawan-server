@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import {
   Activity, ArrowLeftRight, Bell, Bot, Boxes, Braces, Menu, Radio, RadioTower, RefreshCw,
-  Settings2,
+  Settings2, Sparkles,
 } from 'lucide-react'
 import { PageHeadingAction, SettingsForm } from './features/network/components'
 import { Agents } from './features/network/panels/Agents'
+import { Assistant } from './features/network/panels/Assistant'
 import { DeviceModels } from './features/network/panels/DeviceModels'
 import { Integrations } from './features/network/panels/Integrations'
 import { RegisterDeviceDialog } from './features/network/panels/RegisterDeviceDialog'
@@ -27,6 +28,12 @@ const navigation: { name: View; icon: typeof Activity }[] = [
   // Agents sits with Integrations rather than at the end because it is the same
   // kind of thing — a way out of the network to something the operator runs — and
   // it is the one entry whose page describes a service this console cannot control.
+  //
+  // Assistant sits beside it because it is the same capability from the other end:
+  // the same read-only tools, reached from this page instead of from an agent the
+  // operator configured elsewhere. Keeping them adjacent is what makes that
+  // relationship visible rather than something to discover.
+  { name: 'Assistant', icon: Sparkles },
   { name: 'Agents', icon: Bot },
   { name: 'Events', icon: Radio },
 ]
@@ -171,6 +178,11 @@ function App() {
     // point of this page is that the service it describes is a third process the
     // console can neither configure nor vouch for.
     Agents: 'Let an agent read the network over the Model Context Protocol.',
+    // Worded as a reader rather than an oracle, because that is the honest claim: it
+    // looks things up through the same read-only tools the Agents page describes, and
+    // a sentence promising it "knows your network" is the one this feature has to be
+    // careful not to make.
+    Assistant: 'Ask why something is happening. It looks the answer up, and can only read.',
   }
 
   const title = view === 'Overview' ? 'Network overview' : view
@@ -363,6 +375,7 @@ function App() {
           {view === 'Models' && <DeviceModels decoding={status?.decoding} />}
           {view === 'Integrations' && <Integrations />}
           {view === 'Agents' && <Agents />}
+          {view === 'Assistant' && <Assistant />}
           {view === 'Events' && <EventsView events={events} />}
           {view === 'Settings' && <SettingsForm
             draft={settingsDraft}

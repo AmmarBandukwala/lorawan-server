@@ -31,6 +31,15 @@ import {
 import {
   AGENT_STATE_ACTION, AGENT_STATE_HEADLINE, agentAccessState,
 } from '../src/features/network/control/agentAccess'
+import {
+  ASSISTANT_STATE_ACTION, ASSISTANT_STATE_HEADLINE, applyEvent, assistantCaveats,
+  assistantState, createEventReader, emptyAnswer, historyFor, refusalMessage,
+  AssistantRefused,
+} from '../src/features/network/control/assistant'
+import type {
+  AssistantEvent, AssistantReport, AssistantTurn,
+} from '../src/features/network/control/assistant'
+import { AnswerPanel, Assistant as AssistantPanel } from '../src/features/network/panels/Assistant'
 import { readSettings } from '../src/features/network/snapshot'
 import type { AgentAccessReport } from '../src/features/network/control/agentAccess'
 import { deviceFormError, deviceFormRequest, normalizeHex } from '../src/features/network/validation'
@@ -518,7 +527,7 @@ check('the counters say what they cover', cleanHtml, 'Only models that have sent
 // ---------------------------------------------------------------------------
 
 const deviceViews: View[] = ['Devices']
-const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Integrations', 'Agents', 'Settings']
+const otherViews: View[] = ['Overview', 'Gateways', 'Events', 'Models', 'Integrations', 'Assistant', 'Agents', 'Settings']
 for (const view of deviceViews) {
   assert(`the heading offers device registration on ${view}`, viewOffersDeviceRegistration(view))
 }
@@ -875,6 +884,245 @@ assert('an unanswerable check reports the console’s own failure, not the liste
   unknownHtml.includes('Cannot be checked right now') &&
   unknownHtml.includes('Failed to fetch') &&
   !unknownHtml.includes('Not enabled on this deployment'))
+
+// ---------------------------------------------------------------------------
+// The assistant: reading a streamed answer.
+//
+// The parser is the part most worth pinning. A streamed response arrives in chunks
+// that have nothing to do with frame boundaries — one read can carry three events and
+// another can split one in the middle of its JSON. Every fake reader hands over whole
+// frames, so a parser written for that works in every test and drops half an answer
+// over a real socket. These feed it the splits a socket actually makes.
+// ---------------------------------------------------------------------------
+
+const frame = (event: AssistantEvent) => `data: ${JSON.stringify(event)}\n\n`
+
+const oneFrameOneChunk = createEventReader()
+assert('a whole frame in one read yields one event',
+  oneFrameOneChunk(frame({ type: 'status', text: 'thinking' })).length === 1)
+
+const threeInOne = createEventReader()
+const batched = threeInOne(
+  frame({ type: 'status', text: 'a' }) + frame({ type: 'token', text: 'b' })
+  + frame({ type: 'done', model: 'llama' }),
+)
+assert('three frames in one read yield three events', batched.length === 3)
+assert('and they keep their order', batched[2].type === 'done')
+
+// The split that matters: the boundary falls inside the JSON, not between frames.
+const splitMidJSON = createEventReader()
+const partial = frame({ type: 'token', text: 'no session' })
+assert('a frame cut mid-JSON yields nothing yet rather than a guess',
+  splitMidJSON(partial.slice(0, partial.length - 9)).length === 0)
+const completed = splitMidJSON(partial.slice(partial.length - 9))
+assert('the rest completes it, with the text intact',
+  completed.length === 1 && completed[0].text === 'no session')
+
+// Split at every possible offset, which is the only way to be sure the parser is
+// genuinely incremental rather than accidentally right on the two splits above.
+let everySplitHeld = true
+const probe = frame({ type: 'token', text: 'temperature 21.5' })
+for (let cut = 1; cut < probe.length; cut++) {
+  const reader = createEventReader()
+  const got = [...reader(probe.slice(0, cut)), ...reader(probe.slice(cut))]
+  if (got.length !== 1 || got[0].text !== 'temperature 21.5') everySplitHeld = false
+}
+assert('the parser survives a split at every offset in the frame', everySplitHeld)
+
+// One character at a time: the pathological case, and the one a mocked reader never
+// produces.
+const dribble = createEventReader()
+let dribbled: AssistantEvent[] = []
+for (const char of frame({ type: 'done', model: 'qwen', tokens: 12 })) {
+  dribbled = dribbled.concat(dribble(char))
+}
+assert('a frame dribbled in one character at a time still arrives',
+  dribbled.length === 1 && dribbled[0].model === 'qwen' && dribbled[0].tokens === 12)
+
+// A keepalive comment must not end the answer. Proxies emit them precisely when a
+// response is slow, which is every time here.
+const withComment = createEventReader()
+assert('a keepalive comment is ignored rather than parsed',
+  withComment(': keepalive\n\n' + frame({ type: 'token', text: 'still here' })).length === 1)
+
+const badFrame = createEventReader()
+assert('a frame that is not JSON is dropped rather than thrown on',
+  badFrame('data: not json at all\n\n' + frame({ type: 'token', text: 'kept' })).length === 1)
+
+// A frame the server wrote without its terminating blank line — what a proxy timing
+// out mid-answer looks like — must still be surfaced rather than discarded silently.
+const truncated = createEventReader()
+truncated('data: {"type":"token","text":"the device has no"}')
+assert('a frame left unterminated when the stream closes still arrives',
+  truncated('\n\n').length === 1)
+
+// ---------------------------------------------------------------------------
+// Folding events into the answer. What a failure does to the text already on screen
+// is the whole behaviour of this panel, and all of it is pure.
+// ---------------------------------------------------------------------------
+
+let folded = emptyAnswer()
+for (const event of [
+  { type: 'status', text: 'thinking' },
+  { type: 'tool_call', tool: 'diagnose_device' },
+  { type: 'tool_result', tool: 'diagnose_device', ok: true },
+  { type: 'token', text: 'The device ' },
+  { type: 'token', text: 'has no session.' },
+  { type: 'done', model: 'llama3.1', endpoint: 'http://ollama:11434/v1', tokens: 812 },
+] as AssistantEvent[]) folded = applyEvent(folded, event)
+
+assert('tokens accumulate rather than replace', folded.text === 'The device has no session.')
+assert('the progress line clears once real text arrives', folded.status === '')
+assert('the lookup trail records what was read',
+  folded.tools.length === 1 && folded.tools[0].name === 'diagnose_device'
+  && folded.tools[0].ok === true)
+assert('the answer says which model gave it', folded.meta?.model === 'llama3.1')
+assert('and how much it cost', folded.meta?.tokens === 812)
+assert('a finished answer is marked finished', folded.done)
+
+// A lookup that failed must stay visible as a failure. An answer built on a read that
+// never happened is exactly the confident wrong answer this feature risks.
+const failedRead = applyEvent(
+  applyEvent(emptyAnswer(), { type: 'tool_call', tool: 'list_events' }),
+  { type: 'tool_result', tool: 'list_events', ok: false })
+assert('a failed lookup is marked failed rather than dropped', failedRead.tools[0].ok === false)
+
+// Two calls to the same tool: a result must close the outstanding one, not the first
+// one it happens to see.
+let twice = emptyAnswer()
+for (const event of [
+  { type: 'tool_call', tool: 'get_device' },
+  { type: 'tool_result', tool: 'get_device', ok: true },
+  { type: 'tool_call', tool: 'get_device' },
+  { type: 'tool_result', tool: 'get_device', ok: false },
+] as AssistantEvent[]) twice = applyEvent(twice, event)
+assert('a result answers the outstanding call, not the earlier one',
+  twice.tools.length === 2 && twice.tools[0].ok === true && twice.tools[1].ok === false)
+
+// The load-bearing one: a failure partway through keeps the text that arrived.
+const halfAnswered = applyEvent(
+  applyEvent({ ...emptyAnswer(), text: 'Two gateways are online. ' },
+    { type: 'error', text: 'the runtime stopped answering' }),
+  { type: 'done' })
+assert('a failure keeps the part of the answer that arrived',
+  halfAnswered.text === 'Two gateways are online. ')
+assert('and reports the failure beside it rather than instead of it',
+  halfAnswered.error.includes('stopped answering'))
+assert('an error with no text still says something happened',
+  applyEvent(emptyAnswer(), { type: 'error' }).error !== '')
+
+// An event kind this build does not know must not blank the screen: the console and
+// the API are deployed independently, and a new event type is a routine change.
+const unknownKind = applyEvent({ ...emptyAnswer(), text: 'kept' },
+  { type: 'reasoning_summary' } as unknown as AssistantEvent)
+assert('an unrecognised event kind is ignored rather than fatal',
+  unknownKind.text === 'kept' && unknownKind.error === '')
+
+// History: the API refuses more than it accepts, so the page trims first, and from
+// the front, because the oldest exchange is the one least likely to be needed.
+const longConversation: AssistantTurn[] = []
+for (let i = 0; i < 60; i++) {
+  longConversation.push({ role: i % 2 === 0 ? 'user' : 'assistant', content: `turn ${i}` })
+}
+const trimmedHistory = historyFor(longConversation)
+assert('history is capped at what the API accepts', trimmedHistory.length === 40)
+assert('the oldest turns are the ones dropped', trimmedHistory[0].content === 'turn 20')
+assert('the newest turn survives', trimmedHistory[39].content === 'turn 59')
+assert('a short conversation is sent whole',
+  historyFor([{ role: 'user', content: 'a' }]).length === 1)
+assert('an empty turn is not sent as context',
+  historyFor([{ role: 'user', content: '   ' }, { role: 'user', content: 'real' }]).length === 1)
+
+// ---------------------------------------------------------------------------
+// The assistant's configuration states, and what the page may claim in each.
+// ---------------------------------------------------------------------------
+
+for (const state of ['checking', 'not-configured', 'ready', 'unreachable'] as const) {
+  assert(`assistant state ${state} has a headline and an action`,
+    (ASSISTANT_STATE_HEADLINE[state] ?? '').length > 3
+    && (ASSISTANT_STATE_ACTION[state] ?? '').length > 10)
+}
+
+const assistantReport = (over: Partial<AssistantReport>): AssistantReport => ({
+  configured: true, model: 'llama3.1', endpoint: 'http://ollama:11434/v1',
+  has_vocabulary: true, detail: '', ...over,
+})
+assert('an assistant that was never configured is its own state, not a failure',
+  assistantState(assistantReport({ configured: false }), 'done') === 'not-configured')
+assert('configured is ready', assistantState(assistantReport({}), 'done') === 'ready')
+// The console failing to reach its own API must not be reported as the assistant
+// being switched off: one sends the operator to .env, the other to the container.
+assert('the console not answering is not read as the assistant being off',
+  assistantState(null, 'failed') === 'unreachable')
+assert('and nothing is claimed before the read returns',
+  assistantState(null, 'checking') === 'checking')
+
+assert('the read-only limit is stated before the first question',
+  assistantCaveats(assistantReport({})).some((note) => note.includes('only read')))
+assert('a missing vocabulary is called out, because it changes what an answer quotes',
+  assistantCaveats(assistantReport({ has_vocabulary: false }))
+    .some((note) => note.includes('paraphrased')))
+assert('and it is not mentioned when the vocabulary was read',
+  !assistantCaveats(assistantReport({})).some((note) => note.includes('paraphrased')))
+
+assert('an unconfigured assistant is explained in terms of what to set',
+  refusalMessage(new AssistantRefused(503, 'assistant_not_configured', ''), 'fallback')
+    .includes('LLM_BASE_URL'))
+assert('a buffering proxy is explained as the proxy problem it is',
+  refusalMessage(new AssistantRefused(500, 'assistant_streaming_unsupported', ''), 'x')
+    .includes('buffering'))
+assert('an ordinary network error keeps its own message',
+  refusalMessage(new Error('Failed to fetch'), 'fallback') === 'Failed to fetch')
+assert('an error with nothing to say falls back rather than rendering blank',
+  refusalMessage(new Error('   '), 'The console could not ask the model.')
+    === 'The console could not ask the model.')
+assert('a refusal with no code of its own falls back to the console’s sentence',
+  refusalMessage(new AssistantRefused(500, 'assistant_failed', 'the runtime is down'), 'fb')
+    === 'the runtime is down')
+
+// The panels. Effects do not run under renderToString, so the page render is the
+// pre-read state: it must not announce a configuration it has not established.
+const assistantHtml = renderToString(h(AssistantPanel))
+check('the assistant page renders its heading', assistantHtml, 'Ask the network')
+check('the assistant page starts by saying it is checking', assistantHtml, 'Checking…')
+assert('it declares no configuration before the read has returned',
+  !assistantHtml.includes('Not enabled on this deployment') && !assistantHtml.includes('Ready'))
+assert('it offers no question box before it knows a model exists',
+  !assistantHtml.includes('assistant-question'))
+
+const answerProps = { asking: false, refusal: '' }
+const blankAnswerHtml = renderToString(h(AnswerPanel, { ...answerProps, answer: emptyAnswer() }))
+check('an answer panel with nothing in it says so', blankAnswerHtml, 'Nothing asked yet.')
+assert('and it does not claim a failure where there is none',
+  !blankAnswerHtml.includes('role="alert"'))
+
+const partialHtml = renderToString(h(AnswerPanel, { ...answerProps, answer: halfAnswered }))
+check('a partial answer is still shown after a failure', partialHtml, 'Two gateways are online.')
+check('and the failure is shown too', partialHtml, 'the runtime stopped answering')
+assert('both at once, rather than one replacing the other',
+  partialHtml.includes('Two gateways are online.') && partialHtml.includes('role="alert"'))
+
+const trailHtml = renderToString(h(AnswerPanel, { ...answerProps, answer: twice }))
+check('the lookup trail names the tool it read', trailHtml, 'get_device')
+check('a failed lookup is labelled as one', trailHtml, 'could not be read')
+
+const finishedHtml = renderToString(h(AnswerPanel, { ...answerProps, answer: folded }))
+check('a finished answer names the model that gave it', finishedHtml, 'llama3.1')
+check('and where the question went', finishedHtml, 'http://ollama:11434/v1')
+check('and what it cost', finishedHtml, '812 tokens')
+assert('a finished answer does not claim to still be writing',
+  !finishedHtml.includes('Still writing'))
+
+const writingHtml = renderToString(h(AnswerPanel, {
+  asking: true, refusal: '', answer: { ...emptyAnswer(), text: 'The device ' },
+}))
+check('an answer in progress says so', writingHtml, 'Still writing')
+
+const refusedHtml = renderToString(h(AnswerPanel, {
+  asking: false, refusal: 'No model is configured on this console.', answer: emptyAnswer(),
+}))
+assert('a refusal is dressed as one', refusedHtml.includes('role="alert"'))
+check('and says what it says', refusedHtml, 'No model is configured on this console.')
 
 let failed = 0
 for (const [name, ok] of checks) {

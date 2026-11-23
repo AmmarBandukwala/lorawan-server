@@ -126,6 +126,23 @@ services:
       # simply does not run one — which is the wrong remedy to send someone off with.
       # Set it in .env alongside MCP_AUTH_TOKEN when you do start the profile.
       MCP_URL: ${MCP_URL:-}
+      # The assistant. Both are needed or neither: one without the other is refused
+      # at startup rather than started half-wired, because a page with an assistant
+      # panel that fails every question reads as a broken console.
+      #
+      # They also do nothing unless MCP_URL is set, since the listener is the only
+      # thing the assistant can read. Without it the assistant stays off and says so,
+      # rather than answering about a network it cannot see.
+      #
+      # The endpoint is reported to the page on purpose: the argument for a local
+      # model is that nothing leaves the network, and that is only reassuring if the
+      # page shows where the request went.
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      # The assistant authenticates to the listener with the same token the listener
+      # was started with, so one variable and one rotation.
+      MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy

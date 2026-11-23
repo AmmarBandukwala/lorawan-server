@@ -22,6 +22,7 @@ telemetry through a third-party cloud to find out.
 - [Turn bytes into readings](#turn-bytes-into-readings)
 - [Read the event log](#read-the-event-log)
 - [Agent integration (MCP)](#agent-integration-mcp)
+- [Ask the network](#ask-the-network)
 - [Operational considerations](#operational-considerations)
 - [Contributing](#contributing)
 - [Status](#status)
@@ -281,6 +282,40 @@ event destination and installing a payload formatter are absent from every profi
 [`mcp/README.md`](mcp/README.md) explains why those are excluded rather than merely
 gated.
 
+## Ask the network
+
+The console has a built-in assistant: ask "why has node 0011223344556677 not
+reported since Tuesday" and it looks the answer up rather than guessing at it. It is
+a second MCP client, so it reads through the same listener an external agent uses and
+sees exactly what that agent would see.
+
+It needs a model endpoint and a listener, and stays off without both:
+
+```sh
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_MODEL=qwen2.5:7b-instruct
+MCP_URL=http://mcp:8092
+```
+
+Any OpenAI-compatible endpoint works — Ollama, vLLM, LM Studio, or a hosted one with
+`LLM_API_KEY`. Set `LLM_BASE_URL` and `LLM_MODEL` without `MCP_URL` and the assistant
+declines to run: a model answering about a network it cannot see is indistinguishable
+from a correct answer, which makes it worse than no answer.
+
+**It can only read.** The tool filter lives in the console, not the listener, so the
+assistant cannot queue a frame or change a device even when the listener is started
+with `MCP_PROFILE=operate`. An answer that describes an action it took is a bug.
+
+The page names the model and shows the endpoint every question goes to, because the
+argument for a local model is that nothing leaves your network, and that is only
+reassuring if you can check it.
+
+The honest limitation is model quality. Below roughly a 7-8B model quantised, tool
+calling gets unreliable: the model answers from general LoRaWAN knowledge instead of
+looking, and produces advice that reads well and describes a network it never read.
+The page lists which lookups it actually made, so a confident answer backed by no
+lookups is visible rather than hidden.
+
 ## Operational considerations
 
 Running this yourself carries obligations that a feature list does not show.
@@ -341,9 +376,16 @@ npm install && npm run lint && npm run build
 npm run smoke           # renders the console's components and asserts on their output
 ```
 
-`ns/Makefile` runs the Go toolchain in Docker, so no local Go installation is needed.
-`make test-pg` runs the storage tests against a real PostgreSQL; `NS_TEST_DSN` points
-them at a database.
+`ns/Makefile` and `mcp/Makefile` run the Go toolchain in Docker, so no local Go
+installation is needed. `make test-pg` runs the storage tests against a real
+PostgreSQL; `NS_TEST_DSN` points them at a database.
+
+The three Go modules do not share a toolchain: `ns/` is on 1.24, while `api/` and
+`mcp/` are on 1.25 because the MCP Go SDK requires it. With the default
+`GOTOOLCHAIN=auto` Go fetches what a module asks for, so this is invisible; set
+`GOTOOLCHAIN=local` to pin the installed toolchain and `cd api && go test ./...`
+becomes a startup error naming the version instead. The Dockerfiles pin the same
+versions the modules declare, which is the arrangement the CI images rely on.
 
 A successful build and test run does not cover everything, because prose is not
 compiled. After any move or rename:
@@ -362,7 +404,8 @@ positives is a check that gets ignored.
 ```
 ns/            network server — protocol codec, regions, engine, gateway
                transport, integrations, provisioning API (see ns/README.md)
-api/           console API: reads ns_* tables, provisions through the ns API
+api/           console API: reads ns_* tables, provisions through the ns API,
+               and hosts the assistant (llm/, mcpclient/, assistant/)
 mcp/           optional MCP server for agents — its own module and go.mod
 src/           React console
 db/            database bootstrap (schema is owned by the services' migrations)

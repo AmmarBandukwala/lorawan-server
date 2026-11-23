@@ -61,6 +61,12 @@ type Server struct {
 	// and the page has a truthful thing to say either way.
 	agentAccess AgentAccess
 
+	// assistant answers questions about the network, or nil when no model is
+	// configured. Same optional shape as agentAccess, for the same reason: the
+	// endpoints answer with their own state rather than pretending to be broken.
+	assistant     Assistant
+	assistantInfo AssistantInfo
+
 	// The band list the network server publishes, cached briefly so saving a
 	// facility profile does not pay a round trip. See supportedRegions.
 	regionMu      sync.Mutex
@@ -147,6 +153,12 @@ func (s *Server) Handler() http.Handler {
 	// Whether an MCP listener is reachable. Read-only, and answered 200 even when
 	// the listener is down: the console established that fact, it did not fail.
 	mux.HandleFunc("GET /api/v1/mcp", s.getAgentAccess)
+
+	// The assistant. It can only read — the tool filter lives in the assistant
+	// package, not here — so nothing on this route changes the network, which is
+	// why it needs no confirmation step and no separate write grouping.
+	mux.HandleFunc("GET /api/v1/assistant", s.getAssistant)
+	mux.HandleFunc("POST /api/v1/assistant/ask", s.askAssistant)
 	return withSecurityHeaders(mux)
 }
 

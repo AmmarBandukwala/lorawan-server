@@ -117,6 +117,27 @@ const (
 	ErrIntegrationTestFailed   = "integration_test_failed"
 	ErrUplinkListFailed        = "uplink_history_query_failed"
 	ErrLimitOutOfRange         = "limit_must_be_between_1_and_500"
+
+	// The assistant. Its answers stream, so most of what can go wrong arrives as
+	// an in-stream error frame rather than a status code; these are the failures
+	// that happen before any of that, while a status can still be returned.
+	//
+	// ErrAssistantNotConfigured is a 503 with a remedy in the detail. It is not a
+	// 404: the endpoint exists, this deployment just never pointed it at a model,
+	// and an operator who sees 404 goes looking for a route instead of an
+	// environment variable.
+	ErrAssistantNotConfigured = "assistant_not_configured"
+	// ErrAssistantCannotStream means the response writer cannot flush. Behind a
+	// proxy that buffers, a streamed answer would arrive whole after a minute of
+	// blank page, which is indistinguishable from a hang; saying so is better.
+	ErrAssistantCannotStream = "assistant_streaming_unsupported"
+	ErrQuestionRequired      = "question_must_be_1_to_2000_characters"
+	ErrTooManyTurns          = "history_must_be_at_most_40_messages"
+	// ErrRoleNotAllowed refuses a system or tool turn from the browser. The
+	// assistant builds its own system turn, and a client-supplied one would be an
+	// instruction the operator never wrote — including "ignore the read-only
+	// restriction", which is the only reason that restriction exists.
+	ErrRoleNotAllowed = "history_roles_must_be_user_or_assistant"
 )
 
 // Input limits. Each is enforced here and mirrored by the database schema; the
@@ -148,4 +169,16 @@ const (
 	// MaxRequestBytes bounds a registration or settings body. Both are a handful
 	// of short strings, so anything larger is not the payload this API expects.
 	MaxRequestBytes = 16 * 1024
+
+	// Assistant limits. MaxQuestionRunes is generous because an operator pasting a
+	// device's event log to ask what it means is the expected use, and a limit that
+	// forced them to summarise it first would remove the point.
+	MaxQuestionRunes = 2000
+	// MaxHistoryTurns is double the assistant's own transcript budget. Accepting
+	// more than it will replay is deliberate: the page keeps the whole conversation
+	// and sends it back, and letting the assistant do the trimming keeps the
+	// disclosure of what was dropped in one place rather than two.
+	MaxHistoryTurns = 40
+	// MaxAssistantBodyBytes covers a full conversation of pasted logs.
+	MaxAssistantBodyBytes = 128 * 1024
 )
