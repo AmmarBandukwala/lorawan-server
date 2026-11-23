@@ -91,7 +91,16 @@ services:
       retries: 5
       start_period: 5s
     networks:
+      # backend for the database, ingress for the published ports. Both are needed:
+      # `backend` is `internal: true`, and Docker will not publish a host port from
+      # a container that sits only on an internal network. It does not reject the
+      # combination either -- compose accepts the mapping, starts the container,
+      # reports it healthy and binds nothing -- so the symptom is a gateway that
+      # cannot reach 6858/udp on a stack whose port list claims 6858 is open. The
+      # gateway and LNS ports are the reason this service exists, so this pair is
+      # load-bearing, not tidiness.
       - backend
+      - ingress
 
   api:
     build:
@@ -178,7 +187,16 @@ services:
       retries: 5
       start_period: 5s
     networks:
+      # backend for the upstreams, ingress for the published port. Both are needed
+      # and the second looks redundant until it is missing: `backend` is
+      # `internal: true`, and Docker cannot publish a host port from a container
+      # that sits only on an internal network. Compose does not reject that
+      # combination -- it accepts the mapping, starts the container, reports it
+      # healthy, and binds nothing, so the only symptom is a connection refused on
+      # a port the config says is open. `web` carries the same pair for the same
+      # reason.
       - backend
+      - ingress
 
   web:
     build: .
