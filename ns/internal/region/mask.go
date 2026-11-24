@@ -33,18 +33,6 @@ func (m ChannelMask) Count() int {
 	return n
 }
 
-// Indices returns the numbers of the enabled channels, which is the form the
-// LinkADRReq payload builder needs.
-func (m ChannelMask) Indices() []int {
-	out := make([]int, 0, m.Count())
-	for i, on := range m {
-		if on {
-			out = append(out, i)
-		}
-	}
-	return out
-}
-
 // Enabled reports whether channel n is on. Out-of-range is false.
 func (m ChannelMask) Enabled(n int) bool {
 	return n >= 0 && n < len(m) && m[n]

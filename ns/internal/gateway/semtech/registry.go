@@ -139,12 +139,6 @@ func (r *registry) list() []GatewayRecord {
 	return out
 }
 
-func (r *registry) count() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return len(r.byEUI)
-}
-
 // onlineCount is the number the dashboard shows as "gateways online".
 func (r *registry) onlineCount() int {
 	now := r.now()

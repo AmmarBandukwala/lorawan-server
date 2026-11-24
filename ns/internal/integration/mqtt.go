@@ -288,9 +288,6 @@ func mqttClientID(configured string) string {
 // Name identifies this sink in logs and on the status page.
 func (m *MQTT) Name() string { return "mqtt:" + m.host }
 
-// Broker is the configured address, for the integrations panel.
-func (m *MQTT) Broker() string { return m.cfg.BrokerURL }
-
 // Topic is the configured topic template.
 func (m *MQTT) Topic() string { return m.tmpl.raw }
 

@@ -41,11 +41,6 @@ func (m MType) IsUplink() bool {
 	return m == MTypeJoinRequest || m == MTypeUnconfirmedDataUp || m == MTypeConfirmedDataUp
 }
 
-// IsConfirmed reports confirmed (ack-requiring) message types.
-func (m MType) IsConfirmed() bool {
-	return m == MTypeConfirmedDataUp || m == MTypeConfirmedDataDown
-}
-
 // MHDR is the 1-byte MAC header: MType (bits 7..5), RFU (bits 4..2),
 // Major (bits 1..0).
 type MHDR struct {

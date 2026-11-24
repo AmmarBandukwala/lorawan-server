@@ -111,9 +111,6 @@ func NewWebhook(cfg WebhookConfig) (*Webhook, error) {
 // Name implements Sink.
 func (w *Webhook) Name() string { return "webhook:" + w.host }
 
-// URL is the configured endpoint, for the status page.
-func (w *Webhook) URL() string { return w.url }
-
 // Publish POSTs the event, retrying on transport errors and on server-side
 // status codes.
 //

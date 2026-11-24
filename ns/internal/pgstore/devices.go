@@ -25,14 +25,6 @@ func (s *Store) DeviceByDevEUI(ctx context.Context, devEUI lorawan.EUI64) (*engi
 	return scanDevice(row)
 }
 
-// DeviceByDevAddr looks up a device by its current address, for ABP devices
-// that never join and for operator tooling.
-func (s *Store) DeviceByDevAddr(ctx context.Context, devAddr lorawan.DevAddr) (*engine.Device, error) {
-	row := s.pool.QueryRow(ctx,
-		`SELECT `+deviceColumns+` FROM ns_devices WHERE dev_addr = $1`, devAddrText(devAddr))
-	return scanDevice(row)
-}
-
 func scanDevice(row pgx.Row) (*engine.Device, error) {
 	var (
 		device           engine.Device
