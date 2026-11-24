@@ -242,12 +242,16 @@ const (
 // maxToolResultBytes caps one lookup's result before it is replayed to the model, and
 // maxToolResultsTotalBytes caps all of them for one question.
 //
-// Both are needed. Measured at the read profile, a request costs about 5,000 tokens
-// before the model reads a single result: roughly 2,500 for the guidance block and the
-// event vocabulary, and roughly 2,600 for the twelve tool definitions — the schemas are
-// the largest single item, so trimming the prose saves less than it looks. That figure
-// is a floor: it is 4 characters per token, and JSON with punctuation tokenises denser
-// than that. Against it, a `list_devices` on a few hundred nodes is tens of thousands of
+// Both are needed. Measured against the real Qwen2.5 tokenizer rather than estimated,
+// the first request of a question costs 4,199 tokens before the model reads a single
+// result: 1,870 for the twelve tool definitions, 1,684 for the event vocabulary, 645 for
+// the guidance and framing. The vocabulary is the item to trim if this ever has to
+// shrink — the same ground is covered on demand by the listener's explain_event_reason
+// tool — but it stays, because a model that has never seen the reason vocabulary guesses
+// at it, and a confident wrong reason is the failure this whole feature is arranged to
+// avoid.
+//
+// Against that 4,199, a `list_devices` on a few hundred nodes is tens of thousands of
 // bytes on its own, and the nsclient cap of 4 MB protects this process, not the window.
 //
 // The two caps together keep the worst case near 6,000 tokens of tool output, which with

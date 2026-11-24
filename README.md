@@ -75,6 +75,8 @@ the network — restrict it to the gateway subnet at the firewall.
 | `web` | The React console, behind nginx, which proxies `/api` to `api`. | http://127.0.0.1:8082 |
 | `db` | PostgreSQL. Each service owns its own tables through its own migration runner. | internal only |
 | `mcp` | Optional MCP server for agents. Off unless you start the profile. | 8092 on loopback |
+| `ollama` | Optional local model for the assistant. Off unless you start the profile. | 11434 on loopback |
+| `llm-model` | One-shot: fetches the model into the volume, then exits. Part of the same profile. | — |
 
 The database and the API are on an internal Docker network with no published
 ports, so nothing outside the host can reach them.
@@ -289,15 +291,25 @@ reported since Tuesday" and it looks the answer up rather than guessing at it. I
 a second MCP client, so it reads through the same listener an external agent uses and
 sees exactly what that agent would see.
 
-It needs a model endpoint and a listener, and stays off without both:
+It needs a model endpoint and a listener, and stays off without both. The simplest
+way to supply one is the model that ships with this stack, which pulls
+`qwen2.5:7b-instruct-q4_K_M` into a named volume and serves it on the internal
+network:
 
 ```sh
-LLM_BASE_URL=http://host.docker.internal:11434/v1
-LLM_MODEL=qwen2.5:7b-instruct
+docker compose --profile mcp --profile llm up -d
+```
+
+with these three in `.env`:
+
+```sh
+LLM_BASE_URL=http://ollama:11434/v1
+LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
 MCP_URL=http://mcp:8092
 ```
 
-Any OpenAI-compatible endpoint works — Ollama, vLLM, LM Studio, or a hosted one with
+Any OpenAI-compatible endpoint works instead — Ollama or vLLM on the host with
+`LLM_BASE_URL=http://host.docker.internal:11434/v1`, LM Studio, or a hosted one with
 `LLM_API_KEY`. Set `LLM_BASE_URL` and `LLM_MODEL` without `MCP_URL` and the assistant
 declines to run: a model answering about a network it cannot see is indistinguishable
 from a correct answer, which makes it worse than no answer.
@@ -310,24 +322,60 @@ The page names the model and shows the endpoint every question goes to, because 
 argument for a local model is that nothing leaves your network, and that is only
 reassuring if you can check it.
 
-The honest limitation is model quality. Below roughly a 7-8B model quantised, tool
-calling gets unreliable: the model answers from general LoRaWAN knowledge instead of
-looking, and produces advice that reads well and describes a network it never read.
+### What to expect from a local model
+
+These are measured on an Apple Silicon Mac with Docker Desktop, which gives containers
+no GPU at all — `--gpus=all` fails with "no known GPU vendor found" — so inference is
+CPU-only. On a Linux host with a GPU and a runtime that exposes it, the numbers are
+much better; on a Mac they are what they are.
+
+| | |
+| --- | --- |
+| Model on disk | 4.7 GB |
+| Resident with the model loaded at 16k | about 5.4–5.8 GB of the Docker VM |
+| Cold question, model not yet loaded | about 64 s to an answer |
+| Same question again | about 6 s |
+| Prompt processing | roughly 55–140 tokens a second |
+| Answer generation | roughly 4–11 tokens a second |
+
+The second row is the one that bites: Docker Desktop's VM gets whatever memory the
+desktop app is configured to hand it, 8 GiB by default, and the model takes most of
+it. Raising that in Docker Desktop's settings helps more than anything in this
+repository does. The fourth row is why the first question feels broken and the second
+does not — the runtime loads the weights and processes the fixed prompt once, then
+reuses the cached prefix, so a multi-round lookup pays that cost once rather than per
+round.
+
+The honest limitation on quality is model size. Below roughly a 7-8B model quantised,
+tool calling gets unreliable: the model answers from general LoRaWAN knowledge instead
+of looking, and produces advice that reads well and describes a network it never read.
 The page lists which lookups it actually made, so a confident answer backed by no
 lookups is visible rather than hidden.
 
-Give the model a 16k context window, and check that the runtime honoured it. The
-system prompt and twelve tool definitions cost about 5,000 tokens before the model
-reads anything, so a window smaller than that does not fail loudly: the runtime
-truncates the request, often dropping the system turn, and the model stops calling
-tools while still answering fluently. That reads like a weak model, so check the
-window first.
+`qwen2.5:7b-instruct-q4_K_M` was verified against this stack end to end, and the result
+is worth reading carefully because it is both good and wrong. Asked how many devices are
+provisioned, it called `list_devices`, read the real answer, and named five of the six
+devices that exist — correct names, wrong count, having been shown all six in a result
+small enough that nothing was truncated. So the failure this design guards against
+(answered without looking) is caught, and the failure it cannot guard against (looked,
+then miscounted) is not. Treat a number it gives you as a starting point, not as a
+figure. The page shows which lookups backed the answer, which is what makes the
+difference checkable.
 
-The console sends `max_tokens` and `temperature` and nothing else — there is no
-context-window knob to set here, so it has to be configured on the runtime. For
-Ollama, either `OLLAMA_CONTEXT_LENGTH=16384` on the server process, or bake it into
-the model with a Modelfile containing `PARAMETER num_ctx 16384`. vLLM takes
-`--max-model-len 16384`.
+### The context window has to be 16k
+
+Measured against the real Qwen2.5 tokenizer, the first request of a question costs
+**4,199 tokens** before the model reads a single result: 1,870 for the twelve tool
+definitions, 1,684 for the event vocabulary, 645 for the guidance and framing.
+
+A window smaller than that does not fail loudly. The runtime truncates the request,
+often dropping the system turn, and the model stops calling tools while still answering
+fluently — which reads like a weak model, so check the window first.
+
+The `llm` profile sets `OLLAMA_CONTEXT_LENGTH=16384` for you. For any other runtime it
+has to be configured there, because the console sends `max_tokens` and `temperature`
+and nothing else: `OLLAMA_CONTEXT_LENGTH=16384` on an Ollama server, `PARAMETER
+num_ctx 16384` in a Modelfile, or `--max-model-len 16384` for vLLM.
 
 ## Operational considerations
 

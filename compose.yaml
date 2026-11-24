@@ -215,6 +215,95 @@ services:
       - backend
       - ingress
 
+  # A local model for the assistant, so a question about the network stays on the
+  # network.
+  #
+  # Off by default, like the listener, and for the same kind of reason: it pulls 4.7 GB
+  # on first start and holds about 5.4 GB resident afterwards. Neither should happen
+  # because someone ran `docker compose up`. To enable it:
+  #
+  #   docker compose --profile llm up -d
+  #
+  # and then point the console at it, which is the same pair of variables that turns
+  # the assistant on at all:
+  #
+  #   LLM_BASE_URL=http://ollama:11434/v1
+  #   LLM_MODEL=qwen2.5:7b-instruct-q4_K_M
+  #
+  # Nothing else in the stack needs the published port — the console reaches this over
+  # the internal network — so it is loopback like the other operator-facing endpoints.
+  # It is there for a host-side agent that wants the same model the console uses.
+  #
+  # Two things to know before doing this on a Mac. Docker Desktop gives no GPU to a
+  # container (`--gpus=all` fails with "no known GPU vendor found"), so inference is
+  # CPU-only: roughly 55 tokens a second of prompt processing and 10 a second of
+  # answer. The assistant's fixed prompt is about 5,000 tokens, so the first token of a
+  # cold answer takes on the order of a minute and a half. And the whole Docker VM gets
+  # whatever memory Docker Desktop is configured with — 8 GiB by default — of which this
+  # takes about 5.4 GiB, leaving room for the rest of the stack but not a lot of it.
+  # Raising the VM's memory in Docker Desktop's settings helps more than any setting here.
+  ollama:
+    profiles: ["llm"]
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      # The context window the assistant's context budget is sized against. The console
+      # sends no context parameter of its own, so this is the only place it can be set.
+      # Below the fixed cost the runtime truncates the request rather than refusing it,
+      # usually dropping the system turn, and the assistant then answers fluently
+      # without calling a single tool — which reads as a weak model, not a small window.
+      OLLAMA_CONTEXT_LENGTH: ${LLM_CONTEXT_LENGTH:-16384}
+    volumes:
+      # The weights live here, not in an image layer: 4.7 GB baked into an image would
+      # be re-downloaded by anyone who rebuilt the stack, and it is a model rather than
+      # code. Deleting the volume is how you take the model off the machine.
+      - ollama-data:/root/.ollama
+    ports:
+      - "127.0.0.1:${LLM_PORT:-11434}:11434"
+    healthcheck:
+      # `ollama list` has to reach the API to succeed, so this is a readiness probe
+      # rather than a process-liveness one. The image carries no curl.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 15s
+      retries: 6
+      start_period: 20s
+    networks:
+      # backend for the console, ingress for the published port. Both, for the reason
+      # documented twice above: `backend` is internal, and Docker will not publish a
+      # host port from a container that sits only on it.
+      - backend
+      - ingress
+
+  # One-shot: asks the server above to fetch the model, then exits.
+  #
+  # A separate service rather than an entrypoint wrapper around `ollama serve`, so the
+  # server keeps its own startup path and its own logs, and a failed download shows up
+  # as a container that exited non-zero instead of a server that reports healthy with
+  # nothing in it and fails every question later.
+  #
+  # Deliberately nothing depends on this, including the console. The assistant is an
+  # addition to a dashboard that is otherwise complete, and making the dashboard wait
+  # on a 4.7 GB download would let an offline machine or a bad tag take the whole
+  # console down — which is the failure the console's own startup checks are written to
+  # avoid. The cost of that choice is that the first question after a cold start can
+  # arrive before the model has finished; it fails, and asking again works.
+  llm-model:
+    profiles: ["llm"]
+    image: ollama/ollama:latest
+    # The CLI is a client of the server, so this container tells the running server to
+    # fetch and writes nothing itself. It needs no volume.
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama"]
+    command: ["pull", "${LLM_MODEL:-qwen2.5:7b-instruct-q4_K_M}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - backend
+
   web:
     build: .
     restart: unless-stopped
@@ -228,6 +317,7 @@ services:
 
 volumes:
   postgres-data:
+  ollama-data:
 
 networks:
   backend:
