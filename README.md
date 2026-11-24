@@ -324,10 +324,13 @@ reassuring if you can check it.
 
 ### What to expect from a local model
 
-These are measured on an Apple Silicon Mac with Docker Desktop, which gives containers
-no GPU at all — `--gpus=all` fails with "no known GPU vendor found" — so inference is
-CPU-only. On a Linux host with a GPU and a runtime that exposes it, the numbers are
-much better; on a Mac they are what they are.
+The assumption this stack is sized for is **CPU, on ARM64 or x86**. The Ollama image
+carries both architectures and nothing in the compose file is architecture-specific. A
+GPU is an optimisation on top of that, never a requirement.
+
+On CPU the binding constraint is memory, not speed. Measured on an Apple Silicon Mac
+with Docker Desktop, which gives containers no GPU at all — `--gpus=all` fails with
+"no known GPU vendor found" — so these are honest CPU numbers rather than a Mac penalty:
 
 | | |
 | --- | --- |
@@ -338,13 +341,45 @@ much better; on a Mac they are what they are.
 | Prompt processing | roughly 55–140 tokens a second |
 | Answer generation | roughly 4–11 tokens a second |
 
-The second row is the one that bites: Docker Desktop's VM gets whatever memory the
-desktop app is configured to hand it, 8 GiB by default, and the model takes most of
-it. Raising that in Docker Desktop's settings helps more than anything in this
-repository does. The fourth row is why the first question feels broken and the second
-does not — the runtime loads the weights and processes the fixed prompt once, then
-reuses the cached prefix, so a multi-round lookup pays that cost once rather than per
-round.
+The second row is the one that bites. Docker Desktop's VM gets whatever memory the
+desktop app is configured to hand it, 8 GiB by default, and the model takes most of it;
+the rest of the stack together uses about 50 MiB. Raising that in Docker Desktop's
+settings helps more than anything in this repository does. If the host cannot spare
+about 6 GiB, use the smaller model instead — `LLM_MODEL=qwen2.5:3b-instruct-q4_K_M`,
+about 2 GB — and expect it to be worse at tool calling, not merely slower.
+
+The fourth row is why the first question feels broken and the second does not: the
+runtime loads the weights and processes the fixed prompt once, then reuses the cached
+prefix, so a multi-round lookup pays that cost once rather than per round.
+
+That minute of silence is itself a hazard, because a proxy between the browser and the
+api counts idle seconds and closes a connection that has said nothing for 60. The
+assistant's stream therefore sends a keepalive comment every 15 seconds while the model
+is thinking. It is an SSE comment, which every conforming client ignores, so the page
+needs no special handling and neither does yours — the stream survives an nginx, a Caddy,
+a cloud load balancer or a corporate proxy without anyone editing its idle timeout. If
+you put the console behind something with a shorter timeout than 15 seconds, that is the
+number to change.
+
+### Adding a GPU
+
+On a Linux host with a vendor container toolkit, layer the override:
+
+```sh
+docker compose -f compose.yaml -f compose.gpu.yaml --profile llm up -d
+```
+
+It overrides the service rather than adding a second one, so the service keeps the name
+`ollama` and `LLM_BASE_URL` is the same string on a CPU box and on a machine with four
+cards. It also relaxes the two CPU guards — one loaded model, one request at a time —
+which exist because an 8 GiB VM cannot afford a second set of KV cache; on a host with
+real VRAM, raise them to what you have measured, not to whatever the machine will
+accept.
+
+**This path has not been run.** It was written on a Mac, where no container toolkit
+exists, so what is verified here is that the configuration renders and merges correctly,
+not that inference lands on a card. The CPU path above is the one that was run end to
+end.
 
 The honest limitation on quality is model size. Below roughly a 7-8B model quantised,
 tool calling gets unreliable: the model answers from general LoRaWAN knowledge instead

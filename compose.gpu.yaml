@@ -1,0 +1,41 @@
+# GPU override for the local model. Not used unless you ask for it:
+#
+#   docker compose -f compose.yaml -f compose.gpu.yaml --profile llm up -d
+#
+# The stack assumes CPU on ARM64 or x86, and a GPU is an optimisation on top of that,
+# so this file only adds what a GPU needs and changes nothing else. It overrides the
+# service rather than defining a second one, which is why it is a separate file: the
+# service keeps the name `ollama`, so LLM_BASE_URL is the same string whether the model
+# is running on a CPU or on four cards, and an operator moving between hosts edits the
+# hardware rather than the configuration.
+#
+# NOT VERIFIED ON THE HOST THIS WAS WRITTEN ON. It is written for a Linux host with a
+# vendor container toolkit installed — nvidia-container-toolkit for NVIDIA, which is
+# also what provides the CDI that a bare --gpus flag needs. Docker Desktop on macOS
+# installs no such thing: `docker run --gpus=all` there fails with "failed to discover
+# GPU vendor from CDI: no known GPU vendor found", so this file is inert-to-harmful on
+# a Mac and the CPU path above is the one that was actually run end to end.
+#
+# If the vendor is not NVIDIA, change `driver` to match what the toolkit registered
+# (`docker info --format '{{.Runtimes}}'` shows what the daemon can see). AMD GPUs go
+# through ROCr rather than the nvidia driver; Intel integrated graphics go through the
+# Intel plugin. Guessing the driver name produces a container that fails to start with
+# a message about an unknown driver, which is at least loud.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # A GPU host usually has more memory than an 8 GiB Docker VM, so the CPU guards in
+    # the base file are relaxed here rather than left to be discovered. Each extra
+    # parallel slot costs another model's worth of KV cache, so this is still a deliberate
+    # number and not "as much as possible": raise it with the VRAM you actually measured,
+    # the same way the context window was measured.
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: ${LLM_MAX_LOADED_MODELS:-2}
+      OLLAMA_NUM_PARALLEL: ${LLM_NUM_PARALLEL:-2}
