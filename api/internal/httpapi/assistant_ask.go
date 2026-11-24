@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -86,7 +87,41 @@ func (s *Server) askAssistant(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	stream := &sseWriter{w: w, flusher: flusher}
+
+	// A local model can go silent for the better part of a minute while it loads its
+	// weights and processes the prompt, and an idle proxy reads that as a dead
+	// connection and closes it. The page then shows a stream that stopped after
+	// "thinking" with no error in it, which is the worst shape a failure can take:
+	// nothing says anything went wrong.
+	//
+	// An SSE comment frame is what the specification provides for exactly this, and the
+	// page already ignores colon-prefixed lines. Sending one on a timer makes the
+	// stream survive any proxy with an idle timeout, rather than only the one whose
+	// configuration was edited.
+	keepaliveDone := make(chan struct{})
+	keepaliveCtx, stopKeepalive := context.WithCancel(r.Context())
+	go func() {
+		defer close(keepaliveDone)
+		ticker := time.NewTicker(assistantKeepaliveInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-keepaliveCtx.Done():
+				return
+			case <-ticker.C:
+				if !stream.keepalive() {
+					return
+				}
+			}
+		}
+	}()
+
 	err := s.assistant.Ask(r.Context(), payload.transcript(), stream.write)
+	// Cancelled and joined before returning, because the ResponseWriter is not valid
+	// once this handler does. Waiting on the goroutine rather than just cancelling
+	// avoids a keepalive landing in the middle of a recycled buffer.
+	stopKeepalive()
+	<-keepaliveDone
 	switch {
 	case err == nil, errors.Is(err, context.Canceled):
 		// A cancelled context means the operator closed the tab. That is not a fault,
@@ -155,21 +190,59 @@ func decodeAssistantRequest(w http.ResponseWriter, r *http.Request) (assistantRe
 // A write failure is remembered rather than raised again on later events: once the
 // peer is gone every subsequent write fails too, and the loop wants to stop on the
 // first one, which is what returning an error from emit achieves.
+//
+// Two goroutines write here — the answer loop and the keepalive ticker — so every
+// write holds the mutex. Without it their frames interleave into one unparseable
+// frame, which the page drops silently, so the corruption would show up as a missing
+// status line rather than as anything that looks like a bug.
 type sseWriter struct {
+	mu      sync.Mutex
 	w       http.ResponseWriter
 	flusher http.Flusher
 	broken  bool
 }
 
-func (s *sseWriter) write(event assistant.Event) error {
+// assistantKeepaliveInterval is how often an otherwise silent stream emits a comment
+// frame. It sits well below the 60-second idle timeout that nginx and most load
+// balancers default to, and above the rate at which a thinking model emits status
+// events, so it only ever fires when there is genuinely nothing to report.
+//
+// A var rather than a const only so a test can wait a few milliseconds instead of a
+// quarter of a minute; nothing reads it at any other time.
+var assistantKeepaliveInterval = 15 * time.Second
+
+// keepalive writes one SSE comment frame and reports whether the stream is still
+// usable. A comment carries no event, so a client that follows the specification
+// ignores it; the page does, deliberately.
+func (s *sseWriter) keepalive() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.broken {
-		return context.Canceled
+		return false
 	}
+	if _, err := s.w.Write([]byte(": keepalive\n\n")); err != nil {
+		s.broken = true
+		return false
+	}
+	s.flusher.Flush()
+	return true
+}
+
+func (s *sseWriter) write(event assistant.Event) error {
+	// Marshalled before taking the lock: it cannot fail for a network reason, and
+	// holding the mutex across it would keep the keepalive ticker waiting on work that
+	// has nothing to do with the connection.
 	frame, err := json.Marshal(event)
 	if err != nil {
 		// An event that cannot be marshalled is a programming error in the assistant,
 		// not a network condition, and the answer cannot continue without it.
 		return fmt.Errorf("assistant produced an event that could not be encoded: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.broken {
+		return context.Canceled
 	}
 	// One data line carrying the event's own JSON, whose "type" field is what the page
 	// switches on. Named SSE event types were the alternative and were dropped: they
