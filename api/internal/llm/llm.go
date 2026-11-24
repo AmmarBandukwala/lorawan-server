@@ -197,8 +197,12 @@ type Client struct {
 	apiKey string
 	model  string
 	http   *http.Client
-	first  time.Duration
-	total  time.Duration
+	// connect and first are kept because the transport is built from both: changing
+	// either one after construction means rebuilding it, and holding only the client
+	// would leave a setter that silently changed one budget and not the other.
+	connect time.Duration
+	first   time.Duration
+	total   time.Duration
 }
 
 // Option adjusts a Client at construction.
@@ -209,7 +213,7 @@ type Option func(*Client)
 func WithTimeouts(connect, firstToken, total time.Duration) Option {
 	return func(c *Client) {
 		if connect > 0 {
-			c.http = newHTTPClient(connect)
+			c.connect = connect
 		}
 		if firstToken > 0 {
 			c.first = firstToken
@@ -217,25 +221,35 @@ func WithTimeouts(connect, firstToken, total time.Duration) Option {
 		if total > 0 {
 			c.total = total
 		}
+		c.http = newHTTPClient(c.connect, c.first)
 	}
 }
 
-// newHTTPClient expresses the connect budget on the transport rather than as
-// http.Client.Timeout, and that distinction is the whole point of having three
-// budgets at all.
+// newHTTPClient expresses the connect and first-response budgets on the transport
+// rather than as http.Client.Timeout, and that distinction is the whole point of having
+// three budgets at all.
 //
-// Client.Timeout bounds the entire exchange including the response body, so putting
-// 10 s there would cut a CPU generation off ten seconds in while this package
-// promises a five-minute total. Dial and response-header timeouts are the two that
-// actually mean "the endpoint is not there" and "the endpoint accepted and is silent
-// at the HTTP level". The budgets that concern the body — first token and total — are
-// applied as contexts per request, where cancelling them genuinely aborts the read.
-func newHTTPClient(connect time.Duration) *http.Client {
+// Client.Timeout bounds the entire exchange including the response body, so putting the
+// connect value there would cut a CPU generation off at ten seconds while this package
+// promises a five-minute total.
+//
+// ResponseHeaderTimeout takes the first-token budget, not the connect one, and that is
+// the part that was wrong before it was run against a local model. A hosted endpoint
+// sends headers in well under a second, so a ten-second ceiling looked generous. A
+// runtime loading a 7B model onto a CPU takes the better part of a minute to produce its
+// first byte, headers included, so the transport killed the request at ten seconds —
+// before the stream reader that enforces the 120-second first-token budget was ever
+// reached, which made that budget unreachable and the failure indistinguishable from an
+// endpoint that was down. Dial stays on the connect budget: that is the one that means
+// "nothing is listening there".
+func newHTTPClient(connect, first time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: connect, KeepAlive: 30 * time.Second}
 	return &http.Client{
 		Transport: &http.Transport{
-			DialContext:           dialer.DialContext,
-			ResponseHeaderTimeout: connect,
+			DialContext: dialer.DialContext,
+			// How long to wait for the model to start answering, not how long to
+			// wait for a socket. See above.
+			ResponseHeaderTimeout: first,
 			// A streaming response is one long-lived body; the pool must not impose
 			// its own ceiling on how long a connection may live.
 			IdleConnTimeout: 90 * time.Second,
@@ -251,18 +265,18 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{
-		base:   strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
-		apiKey: strings.TrimSpace(cfg.APIKey),
-		model:  strings.TrimSpace(cfg.Model),
-		http:   newHTTPClient(defaultConnectTimeout),
-		first:  defaultFirstTokenBudget,
-		total:  defaultTotalTimeout,
+		base:    strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/"),
+		apiKey:  strings.TrimSpace(cfg.APIKey),
+		model:   strings.TrimSpace(cfg.Model),
+		connect: defaultConnectTimeout,
+		first:   defaultFirstTokenBudget,
+		total:   defaultTotalTimeout,
 	}
 	// The config's own budgets win over the defaults, and WithTimeouts still wins
 	// over both, so a caller has exactly one way to override and it is the last one
 	// applied.
 	if cfg.ConnectTimeout > 0 {
-		c.http = newHTTPClient(cfg.ConnectTimeout)
+		c.connect = cfg.ConnectTimeout
 	}
 	if cfg.FirstTokenTimeout > 0 {
 		c.first = cfg.FirstTokenTimeout
@@ -270,6 +284,10 @@ func New(cfg Config, opts ...Option) (*Client, error) {
 	if cfg.TotalTimeout > 0 {
 		c.total = cfg.TotalTimeout
 	}
+	// Built after the budgets are settled, because the transport is derived from two
+	// of them: building it first is how the first-token budget ended up not applying
+	// to the one transport setting that decides whether a slow model gets answered.
+	c.http = newHTTPClient(c.connect, c.first)
 	for _, opt := range opts {
 		opt(c)
 	}
